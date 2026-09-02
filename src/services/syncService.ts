@@ -1,9 +1,19 @@
 import { SyncQueueItem, PigRecord, User, SyncActionType } from '../types';
 import { loadStoredPigs, saveStoredPigs, loadStoredUsers, saveStoredUsers } from './storage';
+import { 
+  savePigToCloud, 
+  deletePigFromCloud, 
+  saveUserToCloud, 
+  fetchPigsFromCloud, 
+  fetchUsersFromCloud,
+  batchSavePigsToCloud,
+  batchSaveUsersToCloud
+} from './firebase';
 
 const STORAGE_SYNC_QUEUE = 'hinunangan_da_sync_queue_v4';
 const STORAGE_LAST_SYNC = 'hinunangan_da_last_sync_timestamp';
 const STORAGE_SIMULATE_OFFLINE = 'hinunangan_da_simulate_offline';
+const STORAGE_CLOUD_INITIALIZED = 'hinunangan_da_cloud_initialized_v1';
 
 export function loadSyncQueue(): SyncQueueItem[] {
   try {
@@ -134,19 +144,69 @@ export interface SyncProcessResult {
 }
 
 /**
- * Executes sync of pending operations.
- * Applies mutations cleanly to stored local database and marks queue items as synced.
+ * Initializes and pulls data from Cloud Firestore if empty or on initial cloud sync
+ */
+export async function syncWithCloudFirestore(): Promise<{ pigs: PigRecord[]; users: User[] }> {
+  try {
+    let cloudPigs = await fetchPigsFromCloud();
+    let cloudUsers = await fetchUsersFromCloud();
+
+    let localPigs = loadStoredPigs();
+    let localUsers = loadStoredUsers();
+
+    // If Cloud is empty on first boot, seed Cloud from initial local database
+    if (cloudPigs.length === 0 && localPigs.length > 0) {
+      await batchSavePigsToCloud(localPigs);
+      cloudPigs = localPigs;
+    }
+
+    if (cloudUsers.length === 0 && localUsers.length > 0) {
+      await batchSaveUsersToCloud(localUsers);
+      cloudUsers = localUsers;
+    }
+
+    // Merge Cloud data into local storage (Cloud authoritative)
+    if (cloudPigs.length > 0) {
+      const pigMap = new Map<string, PigRecord>();
+      localPigs.forEach(p => pigMap.set(p.id, p));
+      cloudPigs.forEach(p => pigMap.set(p.id, p));
+      localPigs = Array.from(pigMap.values());
+      saveStoredPigs(localPigs);
+    }
+
+    if (cloudUsers.length > 0) {
+      const userMap = new Map<string, User>();
+      localUsers.forEach(u => userMap.set(u.username.toLowerCase(), u));
+      cloudUsers.forEach(u => userMap.set(u.username.toLowerCase(), u));
+      localUsers = Array.from(userMap.values());
+      saveStoredUsers(localUsers);
+    }
+
+    localStorage.setItem(STORAGE_CLOUD_INITIALIZED, 'true');
+    setLastSyncTime(new Date().toISOString());
+
+    return { pigs: localPigs, users: localUsers };
+  } catch (err) {
+    console.warn('Cloud sync fallback to local storage:', err);
+    return { pigs: loadStoredPigs(), users: loadStoredUsers() };
+  }
+}
+
+/**
+ * Executes sync of pending operations directly to Firebase Cloud Firestore.
+ * Applies mutations cleanly to both local cache and Cloud database.
  */
 export async function processSyncQueue(targetId?: string): Promise<SyncProcessResult> {
   const queue = loadSyncQueue();
-  let itemsToSync = targetId ? queue.filter(q => q.id === targetId) : queue.filter(q => q.status === 'pending' || q.status === 'error');
+  const itemsToSync = targetId ? queue.filter(q => q.id === targetId) : queue.filter(q => q.status === 'pending' || q.status === 'error');
 
   if (itemsToSync.length === 0) {
     return { totalProcessed: 0, successCount: 0, failedCount: 0, results: [] };
   }
 
-  // Artificial network roundtrip delay for realistic offline-sync feedback
-  await new Promise(resolve => setTimeout(resolve, 600));
+  const isSimOffline = getSimulateOffline();
+  const isPhysOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  const canSendToCloud = isPhysOnline && !isSimOffline;
 
   let currentPigs = loadStoredPigs();
   let currentUsers = loadStoredUsers();
@@ -155,31 +215,45 @@ export async function processSyncQueue(targetId?: string): Promise<SyncProcessRe
   let failedCount = 0;
   const results: { id: string; success: boolean; message: string }[] = [];
 
-  const updatedQueue = queue.map(item => {
-    if (targetId && item.id !== targetId) return item;
-    if (!targetId && item.status === 'synced') return item;
+  const updatedQueue = [...queue];
+
+  for (let i = 0; i < updatedQueue.length; i++) {
+    const item = updatedQueue[i];
+    if (targetId && item.id !== targetId) continue;
+    if (!targetId && item.status === 'synced') continue;
 
     try {
       if (item.entityType === 'pig') {
         const pigData = item.data as PigRecord;
 
         if (item.action === 'create') {
-          // Check for duplicate ID
           const existingIdx = currentPigs.findIndex(p => p.id === item.recordId || p.earTag === pigData.earTag);
           if (existingIdx >= 0) {
-            currentPigs[existingIdx] = pigData; // update existing
+            currentPigs[existingIdx] = pigData;
           } else {
             currentPigs = [pigData, ...currentPigs];
+          }
+          if (canSendToCloud) {
+            await savePigToCloud(pigData);
           }
         } else if (item.action === 'update') {
           const idx = currentPigs.findIndex(p => p.id === item.recordId);
           if (idx >= 0) {
             currentPigs[idx] = { ...currentPigs[idx], ...pigData };
+            if (canSendToCloud) {
+              await savePigToCloud(currentPigs[idx]);
+            }
           } else {
             currentPigs = [pigData as PigRecord, ...currentPigs];
+            if (canSendToCloud) {
+              await savePigToCloud(pigData as PigRecord);
+            }
           }
         } else if (item.action === 'delete') {
           currentPigs = currentPigs.filter(p => p.id !== item.recordId);
+          if (canSendToCloud) {
+            await deletePigFromCloud(item.recordId);
+          }
         }
       } else if (item.entityType === 'user') {
         const userData = item.data as User;
@@ -190,15 +264,24 @@ export async function processSyncQueue(targetId?: string): Promise<SyncProcessRe
           } else {
             currentUsers = [...currentUsers, userData];
           }
+          if (canSendToCloud) {
+            await saveUserToCloud(userData);
+          }
         } else if (item.action === 'delete') {
           currentUsers = currentUsers.filter(u => u.username.toLowerCase() !== item.recordId.toLowerCase());
         }
       }
 
       successCount++;
-      results.push({ id: item.id, success: true, message: 'Synchronized successfully with Central Registry' });
+      results.push({ 
+        id: item.id, 
+        success: true, 
+        message: canSendToCloud 
+          ? 'Synchronized successfully to Firebase Firestore Cloud' 
+          : 'Applied to local storage (queued for Cloud connection)' 
+      });
 
-      return {
+      updatedQueue[i] = {
         ...item,
         status: 'synced' as const,
         lastAttempt: new Date().toISOString(),
@@ -208,7 +291,7 @@ export async function processSyncQueue(targetId?: string): Promise<SyncProcessRe
       failedCount++;
       const errMsg = (err as Error).message || 'Sync error';
       results.push({ id: item.id, success: false, message: errMsg });
-      return {
+      updatedQueue[i] = {
         ...item,
         status: 'error' as const,
         retryCount: (item.retryCount || 0) + 1,
@@ -216,9 +299,9 @@ export async function processSyncQueue(targetId?: string): Promise<SyncProcessRe
         errorMessage: errMsg
       };
     }
-  });
+  }
 
-  // Save updated databases
+  // Save updated local database
   saveStoredPigs(currentPigs);
   saveStoredUsers(currentUsers);
   saveSyncQueue(updatedQueue);

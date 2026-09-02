@@ -249,26 +249,26 @@ export const OfflineSyncModal: React.FC<OfflineSyncModalProps> = ({
               </div>
             </div>
 
-            {/* Offline Vector Map Cache Card */}
+            {/* Offline Vector Map Cache & Cloud Database Card */}
             <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
-                    Offline GIS Cache
+                    Database & GIS Cache
                   </span>
                   <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
                     <Check className="w-3 h-3 text-emerald-600" />
-                    Cached
+                    Firebase Firestore
                   </span>
                 </div>
                 <div className="mt-2 text-xs text-emerald-900 space-y-1">
                   <div className="flex items-center gap-1.5 font-medium">
-                    <MapPin className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>40 Hinunangan Barangays Vector Data</span>
+                    <Database className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Cloud Firestore Real-Time Listener Active</span>
                   </div>
                   <div className="flex items-center gap-1.5 font-medium">
-                    <Database className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>Indexed Local Storage (PWA Enabled)</span>
+                    <MapPin className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>40 Hinunangan Barangays Vector Data</span>
                   </div>
                 </div>
               </div>

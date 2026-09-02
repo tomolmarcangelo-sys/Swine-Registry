@@ -20,6 +20,8 @@ import {
   X, 
   Maximize2, 
   RotateCcw,
+  RefreshCw,
+  Building2,
   CheckCircle2,
   ExternalLink,
   ChevronDown,
@@ -28,7 +30,13 @@ import {
   Sparkles,
   Phone,
   Lock,
-  Tag
+  Tag,
+  Biohazard,
+  ShieldAlert,
+  Droplets,
+  Ban,
+  Activity,
+  AlertTriangle
 } from 'lucide-react';
 import { 
   BARANGAYS_DATA, 
@@ -45,7 +53,86 @@ import {
   getClosestBarangay
 } from '../data/constants';
 import { GeolocationHookReturn } from '../hooks/useGeolocation';
-import { MapTileLayer, PigRecord, PurposeType, User } from '../types';
+import { BiosecurityAssessment, MapTileLayer, PigRecord, PurposeType, User } from '../types';
+
+export type HeatmapModeType = 'density' | 'sanitation';
+export type SanitationRiskFilter = 'all' | 'critical_only' | 'moderate_and_critical';
+
+export interface PigBiosecurityEvaluation {
+  score: number; // 0 to 7
+  maxScore: number; // 7
+  percentage: number; // 0 to 100%
+  deficit: number; // 7 - score
+  riskLevel: 'critical' | 'moderate' | 'compliant';
+  riskWeight: number; // multiplier for thermal heat alpha
+  isCriticalHotspot: boolean;
+  isSwillViolation: boolean;
+  missingPractices: string[];
+}
+
+// Biosecurity Scoring and Deficit Calculator
+export function evaluatePigBiosecurity(pig: PigRecord): PigBiosecurityEvaluation {
+  const bio = pig.biosecurity;
+  if (!bio) {
+    const baseScore = pig.asfCleared && pig.vaccinated ? 5 : (pig.asfCleared ? 3 : 1);
+    const deficit = 7 - baseScore;
+    const isCritical = baseScore <= 3;
+    return {
+      score: baseScore,
+      maxScore: 7,
+      percentage: Math.round((baseScore / 7) * 100),
+      deficit,
+      riskLevel: isCritical ? 'critical' : baseScore <= 5 ? 'moderate' : 'compliant',
+      riskWeight: isCritical ? 2.2 : (baseScore <= 5 ? 1.0 : 0.15),
+      isCriticalHotspot: isCritical,
+      isSwillViolation: false,
+      missingPractices: ['Unassessed Baseline Status']
+    };
+  }
+
+  const missing: string[] = [];
+  let score = 0;
+
+  if (bio.footbathMaintenance) score++; else missing.push('No Disinfectant Footbath');
+  if (bio.fencingIntegrity) score++; else missing.push('Compromised Perimeter Fence');
+  if (bio.swillFeedingBanned) score++; else missing.push('Swill Feeding Violation (Severe ASF Risk)');
+  if (bio.disinfectionRoutine) score++; else missing.push('No Regular Pen Disinfection');
+  if (bio.visitorLogControl) score++; else missing.push('Uncontrolled Visitor Access');
+  if (bio.quarantineIsolationPen) score++; else missing.push('No Isolation / Quarantine Pen');
+  if (bio.cleanWaterSource) score++; else missing.push('Unprotected Water Source');
+
+  const deficit = 7 - score;
+  const percentage = Math.round((score / 7) * 100);
+  const isSwillViolation = !bio.swillFeedingBanned;
+  const isCriticalHotspot = score <= 3 || isSwillViolation;
+
+  // Thermal weight formula:
+  // Deficit scaled by 0.45, plus severe weight for non-negotiable DA ASF rules (swill ban & footbath)
+  let riskWeight = deficit * 0.45;
+  if (isSwillViolation) riskWeight += 1.4; // Swill feeding is primary driver of African Swine Fever
+  if (!bio.footbathMaintenance) riskWeight += 0.5;
+  if (!bio.disinfectionRoutine) riskWeight += 0.5;
+  if (!pig.vaccinated) riskWeight += 0.4;
+
+  if (score >= 6 && !isSwillViolation) {
+    riskWeight = 0.05; // Compliant farms produce negligible sanitation heat
+  }
+
+  const riskLevel: 'critical' | 'moderate' | 'compliant' = 
+    isCriticalHotspot ? 'critical' : (score <= 5 ? 'moderate' : 'compliant');
+
+  return {
+    score,
+    maxScore: 7,
+    percentage,
+    deficit,
+    riskLevel,
+    riskWeight: Math.max(0.05, riskWeight),
+    isCriticalHotspot,
+    isSwillViolation,
+    missingPractices: missing
+  };
+}
 
 interface GisMapProps {
   pigs: PigRecord[];
@@ -115,9 +202,12 @@ export const GisMap: React.FC<GisMapProps> = ({
   // States
   const [activeTile, setActiveTile] = useState<MapTileLayer>('satellite');
   const [showHeatmap, setShowHeatmap] = useState<boolean>(false);
+  const [heatmapMode, setHeatmapMode] = useState<HeatmapModeType>('sanitation');
+  const [sanitationRiskFilter, setSanitationRiskFilter] = useState<SanitationRiskFilter>('all');
+  const [showHeatmapToolbar, setShowHeatmapToolbar] = useState<boolean>(true);
   const [showSwinePins, setShowSwinePins] = useState<boolean>(true);
-  const [heatmapRadius, setHeatmapRadius] = useState<number>(35);
-  const [heatmapIntensity, setHeatmapIntensity] = useState<number>(1.2);
+  const [heatmapRadius, setHeatmapRadius] = useState<number>(38);
+  const [heatmapIntensity, setHeatmapIntensity] = useState<number>(1.25);
   const [showBoundary, setShowBoundary] = useState<boolean>(true);
   const [showBarangayNodes, setShowBarangayNodes] = useState<boolean>(true);
   const [showBiosecurityBuffers, setShowBiosecurityBuffers] = useState<boolean>(false);
@@ -180,6 +270,78 @@ export const GisMap: React.FC<GisMapProps> = ({
       return true;
     });
   }, [pigs, currentUser, isAdmin, searchQuery, selectedBarangay, selectedPurpose, selectedHealth]);
+
+  // Aggregate Municipal & Barangay Biosecurity / Sanitation Analytics
+  const biosecurityStats = useMemo(() => {
+    let criticalHotspotCount = 0;
+    let moderateDeficitCount = 0;
+    let compliantCount = 0;
+    let totalScore = 0;
+    let swillViolations = 0;
+    let footbathMissing = 0;
+    let disinfectionMissing = 0;
+    let fencingDamaged = 0;
+
+    const brgyHotspotMap: Record<string, { critical: number; moderate: number; compliant: number; total: number; scoreSum: number; avgScore: number }> = {};
+    BARANGAYS_DATA.forEach(b => {
+      brgyHotspotMap[b.name] = { critical: 0, moderate: 0, compliant: 0, total: 0, scoreSum: 0, avgScore: 0 };
+    });
+
+    filteredPigs.forEach(p => {
+      const bio = evaluatePigBiosecurity(p);
+      totalScore += bio.score;
+
+      if (bio.isCriticalHotspot) {
+        criticalHotspotCount++;
+      } else if (bio.riskLevel === 'moderate') {
+        moderateDeficitCount++;
+      } else {
+        compliantCount++;
+      }
+
+      if (bio.isSwillViolation) swillViolations++;
+      if (p.biosecurity && !p.biosecurity.footbathMaintenance) footbathMissing++;
+      if (p.biosecurity && !p.biosecurity.disinfectionRoutine) disinfectionMissing++;
+      if (p.biosecurity && !p.biosecurity.fencingIntegrity) fencingDamaged++;
+
+      if (brgyHotspotMap[p.barangay]) {
+        brgyHotspotMap[p.barangay].total++;
+        brgyHotspotMap[p.barangay].scoreSum += bio.score;
+        if (bio.isCriticalHotspot) {
+          brgyHotspotMap[p.barangay].critical++;
+        } else if (bio.riskLevel === 'moderate') {
+          brgyHotspotMap[p.barangay].moderate++;
+        } else {
+          brgyHotspotMap[p.barangay].compliant++;
+        }
+      }
+    });
+
+    Object.keys(brgyHotspotMap).forEach(bName => {
+      const bData = brgyHotspotMap[bName];
+      bData.avgScore = bData.total > 0 ? Math.round((bData.scoreSum / (bData.total * 7)) * 100) : 0;
+    });
+
+    const avgScorePct = filteredPigs.length > 0 ? Math.round((totalScore / (filteredPigs.length * 7)) * 100) : 0;
+
+    // Top affected barangays with critical sanitation deficits
+    const topCriticalBarangays = Object.entries(brgyHotspotMap)
+      .filter(([_, d]) => d.critical > 0)
+      .sort((a, b) => b[1].critical - a[1].critical);
+
+    return {
+      criticalHotspotCount,
+      moderateDeficitCount,
+      compliantCount,
+      avgScorePct,
+      swillViolations,
+      footbathMissing,
+      disinfectionMissing,
+      fencingDamaged,
+      brgyHotspotMap,
+      topCriticalBarangays
+    };
+  }, [filteredPigs]);
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -281,10 +443,10 @@ export const GisMap: React.FC<GisMapProps> = ({
       const isVaccinated = pig.vaccinated;
 
       const markerHtml = `
-        <div class="group cursor-pointer" style="position: relative; display: flex; flex-direction: column; align-items: center; transition: transform 0.2s ease;">
+        <div class="group cursor-pointer hover:scale-110" style="position: relative; display: flex; flex-direction: column; align-items: center; transition: transform 0.2s ease;">
           <div style="
-            width: 28px; 
-            height: 28px; 
+            width: 26px; 
+            height: 26px; 
             border-radius: 50%; 
             background: ${color}; 
             border: 2px solid white; 
@@ -298,33 +460,16 @@ export const GisMap: React.FC<GisMapProps> = ({
           ">
             ${isVaccinated ? '🛡️' : '⚠️'}
           </div>
-          <div style="
-            position: absolute;
-            top: -20px;
-            background: #203F2B;
-            color: white;
-            padding: 1px 6px;
-            border-radius: 6px;
-            font-size: 10px;
-            font-family: monospace;
-            font-weight: bold;
-            white-space: nowrap;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-            border: 1px solid #D9A441;
-            pointer-events: none;
-          ">
-            ${pig.earTag}
-          </div>
-          <div style="width: 2px; height: 8px; background: #203F2B;"></div>
-          <div style="width: 8px; height: 3px; border-radius: 50%; background: rgba(0,0,0,0.35);"></div>
+          <div style="width: 2px; height: 6px; background: #203F2B;"></div>
+          <div style="width: 6px; height: 3px; border-radius: 50%; background: rgba(0,0,0,0.35);"></div>
         </div>
       `;
 
       const customIcon = L.divIcon({
         className: 'custom-pig-pin',
         html: markerHtml,
-        iconSize: [28, 40],
-        iconAnchor: [14, 40]
+        iconSize: [26, 36],
+        iconAnchor: [13, 36]
       });
 
       const marker = L.marker([pig.lat, pig.lng], { icon: customIcon });
@@ -754,12 +899,23 @@ export const GisMap: React.FC<GisMapProps> = ({
     }
   }, [focusPigId, pigs]);
 
-  // Center on Hinunangan
+  // Center on Hinunangan & Reset All Filters
   const handleResetView = () => {
     if (mapInstanceRef.current) {
       mapInstanceRef.current.flyTo([HINUNANGAN_CENTER.lat, HINUNANGAN_CENTER.lng], HINUNANGAN_CENTER.zoom);
       setSelectedPig(null);
       setPinnedLocation(null);
+    }
+  };
+
+  // Reset Barangay Isolation to show all 40 barangays & all labels
+  const handleResetAllBarangays = () => {
+    setSelectedBarangay('all');
+    setShowBarangayNodes(true);
+    setSearchQuery('');
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo([HINUNANGAN_CENTER.lat, HINUNANGAN_CENTER.lng], HINUNANGAN_CENTER.zoom);
+      setSelectedPig(null);
     }
   };
 
@@ -878,6 +1034,20 @@ export const GisMap: React.FC<GisMapProps> = ({
             ))}
           </select>
 
+          {/* Refresh / Show All Labels Button */}
+          <button
+            onClick={handleResetAllBarangays}
+            className={`px-2 py-1 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
+              selectedBarangay !== 'all'
+                ? 'bg-[#D9A441] text-[#203F2B] border-[#B9852A] shadow-xs animate-pulse'
+                : 'bg-white text-[#2F5C3F] border-[#DED2AE] hover:bg-[#FBF8EF]'
+            }`}
+            title="Refresh Map & Show All 40 Barangay Labels"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-[#203F2B]" />
+            <span className="text-[11px] font-bold">Show All Labels</span>
+          </button>
+
           {/* Filter Toggle */}
           <button
             onClick={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
@@ -925,23 +1095,45 @@ export const GisMap: React.FC<GisMapProps> = ({
             <span>{pinnedLocation ? 'Pin Placed' : 'Pin New Swine'}</span>
           </button>
 
-          {/* Heatmap Toggle */}
+          {/* Heatmap Toggle Button (Turns on or off with color grading visual indicator) */}
           <button
             onClick={() => {
-              const next = !showHeatmap;
-              setShowHeatmap(next);
-              // When user activates heatmap, keep pins toggle ready
+              if (showHeatmap) {
+                // Turn off heatmap
+                setShowHeatmap(false);
+                setShowSwinePins(true);
+                setShowBarangayNodes(true);
+              } else {
+                // Turn on heatmap and show toolbar
+                setShowHeatmap(true);
+                setShowHeatmapToolbar(true);
+              }
             }}
-            className={`px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 border transition-colors cursor-pointer ${
+            className={`px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 border transition-all cursor-pointer ${
               showHeatmap 
-                ? 'bg-rose-700 text-white border-rose-800 shadow-xs' 
+                ? 'bg-rose-700 text-white border-rose-800 shadow-md ring-2 ring-rose-400/40' 
                 : 'bg-white text-[#55604F] border-[#DED2AE] hover:bg-[#FBF8EF]'
             }`}
-            title="Toggle Swine Density Heatmap"
+            title={showHeatmap ? "Heatmap is Active - Click to Turn Off Heatmap" : "Click to Enable Swine Density Heatmap"}
           >
             <Flame className={`w-3.5 h-3.5 ${showHeatmap ? 'text-amber-300 animate-pulse' : 'text-rose-600'}`} />
-            <span className="hidden sm:inline">Heatmap</span>
+            <span className="font-semibold">{showHeatmap ? 'Heatmap ON' : 'Heatmap'}</span>
+            {showHeatmap && (
+              <span className="hidden md:inline-flex w-7 h-2 rounded-full bg-gradient-to-r from-blue-500 via-emerald-400 via-yellow-400 to-rose-600 ml-0.5 border border-white/40" />
+            )}
           </button>
+
+          {/* Re-open Heatmap Controls if user dismissed the floating bar while keeping Heatmap ON */}
+          {showHeatmap && !showHeatmapToolbar && (
+            <button
+              onClick={() => setShowHeatmapToolbar(true)}
+              className="px-2 py-1.5 bg-[#203F2B] text-[#D9A441] border border-[#D9A441] hover:bg-[#2F5C3F] rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+              title="Show Heatmap Floating Controls & Grading"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline text-[11px]">Controls</span>
+            </button>
+          )}
 
           {/* Dedicated Swine Pins Toggle Icon (Quick toggle especially when in Heatmap mode) */}
           <button
@@ -1025,7 +1217,7 @@ export const GisMap: React.FC<GisMapProps> = ({
       </div>
 
       {/* FLOATING HEATMAP TOOLBAR & PIN/LABEL TOGGLE BAR (When Heatmap is Active) */}
-      {showHeatmap && (
+      {showHeatmap && showHeatmapToolbar && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 bg-[#203F2B]/95 backdrop-blur-md text-white px-3 sm:px-4 py-2 rounded-2xl shadow-2xl border border-[#D9A441] flex flex-wrap items-center gap-2 sm:gap-3 font-sans max-w-[95vw]">
           <div className="flex items-center gap-1.5 text-xs font-serif font-bold text-[#D9A441] pr-2 border-r border-white/20">
             <Flame className="w-4 h-4 text-rose-400 animate-pulse" />
@@ -1077,15 +1269,24 @@ export const GisMap: React.FC<GisMapProps> = ({
             <span className="text-[10px] font-mono">{heatmapRadius}px</span>
           </div>
 
-          {/* Close Heatmap */}
+          {/* Color Grading Spectrum Bar in Toolbar */}
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-black/25 rounded-xl border border-white/10 text-[10px]">
+            <span className="text-[#D9A441] font-mono font-bold">Grading:</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] text-blue-200">Low</span>
+              <div className="w-16 h-2 rounded-full bg-gradient-to-r from-blue-500 via-emerald-400 via-yellow-400 to-rose-600 border border-white/30" />
+              <span className="text-[9px] text-rose-300 font-bold">High</span>
+            </div>
+          </div>
+
+          {/* Close Floating Controls Toolbar (Heatmap remains ON) */}
           <button
             type="button"
             onClick={() => {
-              setShowHeatmap(false);
-              setShowSwinePins(true);
+              setShowHeatmapToolbar(false);
             }}
             className="p-1 hover:bg-white/20 rounded-lg text-white/70 hover:text-white transition-colors cursor-pointer"
-            title="Exit Heatmap Mode"
+            title="Dismiss controls toolbar (Heatmap stays active — click Heatmap button in top bar to turn off)"
           >
             <X className="w-4 h-4" />
           </button>

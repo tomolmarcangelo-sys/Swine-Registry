@@ -17,13 +17,15 @@ import {
   WifiOff,
   Radio,
   RefreshCw,
-  Clock
+  Clock,
+  CloudCheck
 } from 'lucide-react';
 import { loadStoredAuth, loadStoredPigs, loadStoredUsers, saveStoredAuth, saveStoredPigs, saveStoredUsers } from './services/storage';
 import { AppViewMode, PigRecord, User } from './types';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useOfflineSync } from './hooks/useOfflineSync';
-import { enqueueSyncAction } from './services/syncService';
+import { enqueueSyncAction, syncWithCloudFirestore } from './services/syncService';
+import { subscribeToCloudPigs } from './services/firebase';
 
 // Components
 import { LandingView } from './components/LandingView';
@@ -42,6 +44,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => loadStoredAuth());
   const [users, setUsers] = useState<User[]>(() => loadStoredUsers());
   const [pigs, setPigs] = useState<PigRecord[]>(() => loadStoredPigs());
+  const [isCloudConnected, setIsCloudConnected] = useState<boolean>(false);
 
   const [currentView, setCurrentView] = useState<AppViewMode>('dashboard');
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -54,6 +57,37 @@ export default function App() {
 
   const geo = useGeolocation();
   const offlineSync = useOfflineSync();
+
+  // Initial Cloud Firestore synchronization on startup
+  useEffect(() => {
+    syncWithCloudFirestore()
+      .then((synced) => {
+        setPigs(synced.pigs);
+        setUsers(synced.users);
+        setIsCloudConnected(true);
+      })
+      .catch((err) => {
+        console.warn('Initial cloud sync notice:', err);
+      });
+
+    // Realtime listener for live GIS & Swine heatmap updates from other officers
+    const unsubscribe = subscribeToCloudPigs((updatedPigs) => {
+      if (updatedPigs && updatedPigs.length > 0) {
+        setPigs(prev => {
+          const pigMap = new Map<string, PigRecord>();
+          prev.forEach(p => pigMap.set(p.id, p));
+          updatedPigs.forEach(p => pigMap.set(p.id, p));
+          const merged = Array.from(pigMap.values());
+          saveStoredPigs(merged);
+          return merged;
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   // Save changes to storage with offline sync queue tracking
   const handleSavePig = (savedRecord: PigRecord) => {

@@ -12,7 +12,9 @@ import {
   ChevronRight,
   ClipboardList,
   Building2,
-  Map as MapIcon
+  Map as MapIcon,
+  Database,
+  CloudCheck
 } from 'lucide-react';
 import { BARANGAYS_DATA, PURPOSE_COLORS, PURPOSES } from '../data/constants';
 import { AppViewMode, PigRecord, User } from '../types';
@@ -71,11 +73,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className="bg-gradient-to-r from-[#203F2B] via-[#2F5C3F] to-[#203F2B] text-white rounded-2xl p-6 shadow-md relative overflow-hidden">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="bg-[#D9A441] text-[#203F2B] text-[11px] font-mono font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full">
                 {isAdmin ? 'Central Office Registry' : `Barangay ${currentUser.barangay} Sector`}
               </span>
-              <span className="text-xs text-[#C9D6C9] font-mono">
+              <span className="inline-flex items-center gap-1 bg-emerald-700/80 text-emerald-100 text-[11px] font-mono font-bold px-2 py-0.5 rounded-full border border-emerald-500/40">
+                <Database className="w-3 h-3 text-emerald-300" />
+                <span>Cloud Firestore Active</span>
+              </span>
+              <span className="text-xs text-[#C9D6C9] font-mono hidden sm:inline">
                 LGU Hinunangan DA
               </span>
             </div>

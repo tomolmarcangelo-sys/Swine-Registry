@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "pigs": {
+      "title": "Pig Records",
+      "description": "Swine registry records with geolocation and biosecurity data",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "earTag": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "barangay": { "type": "string" },
+        "coordinates": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        },
+        "breed": { "type": "string" },
+        "purpose": { "type": "string" },
+        "vaccinated": { "type": "boolean" },
+        "vaccinationDate": { "type": "string" },
+        "asfCleared": { "type": "boolean" },
+        "healthStatus": { "type": "string" },
+        "notes": { "type": "string" },
+        "registeredBy": { "type": "string" },
+        "registeredAt": { "type": "string" },
+        "biosecurity": { "type": "object" }
+      },
+      "required": ["id", "earTag", "ownerName", "barangay", "coordinates"]
+    },
+    "users": {
+      "title": "System Users",
+      "description": "Municipal Focal Officers and Barangay Agricultural Personnel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "barangay": { "type": "string" },
+        "phone": { "type": "string" }
+      },
+      "required": ["username", "name", "role"]
+    },
+    "syncLogs": {
+      "title": "Sync History Logs",
+      "description": "Audit trail of field synchronization batches",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "author": { "type": "string" },
+        "itemCount": { "type": "number" },
+        "success": { "type": "boolean" }
+      }
+    }
+  }
+}
