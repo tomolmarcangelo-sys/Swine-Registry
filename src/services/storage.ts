@@ -1,5 +1,6 @@
 import { DEFAULT_USERS, INITIAL_SEED_PIGS } from '../data/constants';
 import { PigRecord, User } from '../types';
+import { savePigsToIdb, loadPigsFromIdb } from './indexedDbService';
 
 const STORAGE_USERS = 'hinunangan_da_users_v4';
 const STORAGE_PIGS = 'hinunangan_da_pigs_v4';
@@ -42,8 +43,11 @@ export function loadStoredPigs(): PigRecord[] {
 export function saveStoredPigs(pigs: PigRecord[]): void {
   try {
     localStorage.setItem(STORAGE_PIGS, JSON.stringify(pigs));
+    // Asynchronously save to durable IndexedDB store
+    savePigsToIdb(pigs).catch(err => console.warn('IndexedDB pig save notice:', err));
   } catch (err) {
     console.error('Failed to save pigs to storage', err);
+    savePigsToIdb(pigs).catch(idbErr => console.error('IndexedDB backup failed:', idbErr));
   }
 }
 

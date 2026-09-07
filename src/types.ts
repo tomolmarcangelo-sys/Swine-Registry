@@ -32,6 +32,7 @@ export interface User {
   barangay: string | null;
   email?: string;
   phone?: string;
+  avatarUrl?: string;
 }
 
 export interface PigRecord {
@@ -57,6 +58,21 @@ export interface PigRecord {
   registeredBy: string;
   notes?: string;
   biosecurity?: BiosecurityAssessment;
+  photoUrl?: string;
+  isDeceased?: boolean;
+  mortalityDate?: string;
+  mortalityReason?: string;
+}
+
+export interface SystemSettings {
+  landingHeroTitle?: string;
+  landingHeroSubtitle?: string;
+  landingHeroPhotoUrl?: string;
+  facebookUrl?: string;
+  twitterUrl?: string;
+  contactEmail?: string;
+  documentationUrl?: string;
+  aboutText?: string;
 }
 
 export interface BarangayInfo {
@@ -66,10 +82,11 @@ export interface BarangayInfo {
   isCoastal: boolean;
   purokCount: number;
   focalPerson?: string;
+  terrainType?: string;
   notes?: string;
 }
 
-export type MapTileLayer = 'standard' | 'satellite' | 'terrain' | 'topo' | 'dark';
+export type MapTileLayer = 'roadmap' | 'standard' | 'satellite' | 'hybrid' | 'terrain' | 'topo' | 'dark';
 
 export interface GisLocationPin {
   lat: number;

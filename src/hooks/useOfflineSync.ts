@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { SyncQueueItem } from '../types';
 import { 
   loadSyncQueue, 
@@ -31,6 +31,17 @@ export function useOfflineSync() {
   const errorCount = syncQueue.filter(item => item.status === 'error').length;
   const syncedCount = syncQueue.filter(item => item.status === 'synced').length;
 
+  // Set of record IDs that are pending synchronization (offline drafts or edits)
+  const pendingRecordIds = useMemo(() => {
+    const ids = new Set<string>();
+    syncQueue.forEach(item => {
+      if (item.status === 'pending' || item.status === 'error') {
+        ids.add(item.recordId);
+      }
+    });
+    return ids;
+  }, [syncQueue]);
+
   const refreshQueue = useCallback(() => {
     setSyncQueue(loadSyncQueue());
     setLastSyncTimeState(getLastSyncTime());
@@ -40,7 +51,12 @@ export function useOfflineSync() {
     const next = !isSimulatedOffline;
     setSimulateOffline(next);
     setIsSimulatedOfflineState(next);
-  }, [isSimulatedOffline]);
+    if (!next && autoSyncEnabled) {
+      setTimeout(() => {
+        processSyncQueue().then(refreshQueue);
+      }, 150);
+    }
+  }, [isSimulatedOffline, autoSyncEnabled, refreshQueue]);
 
   const triggerSync = useCallback(async (targetId?: string) => {
     if (isSyncing) return;
@@ -64,11 +80,11 @@ export function useOfflineSync() {
     }
   }, [isSyncing, refreshQueue]);
 
-  // Handle Online / Offline window events
+  // Handle Online / Offline window events and automatic sync
   useEffect(() => {
     const handleOnline = () => {
       setIsPhysicalOnline(true);
-      // If auto-sync is enabled and not simulated offline, trigger background sync
+      // If auto-sync is enabled and not simulated offline, trigger live background sync
       if (!getSimulateOffline() && autoSyncEnabled) {
         processSyncQueue().then(refreshQueue);
       }
@@ -83,11 +99,27 @@ export function useOfflineSync() {
     };
 
     const handleConnectionChange = () => {
-      setIsSimulatedOfflineState(getSimulateOffline());
+      const currentSim = getSimulateOffline();
+      setIsSimulatedOfflineState(currentSim);
+      if (!currentSim && autoSyncEnabled) {
+        processSyncQueue().then(refreshQueue);
+      }
+    };
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible' && !getSimulateOffline() && (typeof navigator !== 'undefined' ? navigator.onLine : true)) {
+        const queue = loadSyncQueue();
+        const hasPending = queue.some(q => q.status === 'pending' || q.status === 'error');
+        if (hasPending && autoSyncEnabled) {
+          processSyncQueue().then(refreshQueue);
+        }
+      }
     };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('hinunangan_sync_queue_updated', handleCustomQueueUpdate);
     window.addEventListener('hinunangan_connection_change', handleConnectionChange);
     window.addEventListener('hinunangan_data_synced', handleCustomQueueUpdate);
@@ -95,11 +127,26 @@ export function useOfflineSync() {
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.removeEventListener('hinunangan_sync_queue_updated', handleCustomQueueUpdate);
       window.removeEventListener('hinunangan_connection_change', handleConnectionChange);
       window.removeEventListener('hinunangan_data_synced', handleCustomQueueUpdate);
     };
   }, [autoSyncEnabled, refreshQueue]);
+
+  // Periodic automatic sync heartbeat when online with pending items
+  useEffect(() => {
+    if (!isOnline || !autoSyncEnabled || pendingCount === 0) return;
+
+    const interval = setInterval(() => {
+      if (isOnline && autoSyncEnabled) {
+        processSyncQueue().then(refreshQueue).catch(() => {});
+      }
+    }, 10000); // Check every 10s
+
+    return () => clearInterval(interval);
+  }, [isOnline, autoSyncEnabled, pendingCount, refreshQueue]);
 
   const removeQueueItem = useCallback((id: string) => {
     removeSyncItem(id);
@@ -121,6 +168,10 @@ export function useOfflineSync() {
     return res;
   }, [refreshQueue]);
 
+  const isRecordPending = useCallback((recordId: string) => {
+    return pendingRecordIds.has(recordId);
+  }, [pendingRecordIds]);
+
   return {
     isOnline,
     isPhysicalOnline,
@@ -131,6 +182,8 @@ export function useOfflineSync() {
     pendingCount,
     errorCount,
     syncedCount,
+    pendingRecordIds,
+    isRecordPending,
     lastSyncTime,
     isSyncing,
     autoSyncEnabled,

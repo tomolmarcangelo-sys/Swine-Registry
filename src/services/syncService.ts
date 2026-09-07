@@ -1,5 +1,6 @@
 import { SyncQueueItem, PigRecord, User, SyncActionType } from '../types';
 import { loadStoredPigs, saveStoredPigs, loadStoredUsers, saveStoredUsers } from './storage';
+import { saveSyncQueueToIdb, loadSyncQueueFromIdb } from './indexedDbService';
 import { 
   savePigToCloud, 
   deletePigFromCloud, 
@@ -14,6 +15,43 @@ const STORAGE_SYNC_QUEUE = 'hinunangan_da_sync_queue_v4';
 const STORAGE_LAST_SYNC = 'hinunangan_da_last_sync_timestamp';
 const STORAGE_SIMULATE_OFFLINE = 'hinunangan_da_simulate_offline';
 const STORAGE_CLOUD_INITIALIZED = 'hinunangan_da_cloud_initialized_v1';
+const STORAGE_CONFLICT_POLICY = 'hinunangan_da_conflict_policy_v1';
+
+export type ConflictPolicy = 'client-wins' | 'server-wins' | 'timestamp';
+
+export function getConflictPolicy(): ConflictPolicy {
+  try {
+    return (localStorage.getItem(STORAGE_CONFLICT_POLICY) as ConflictPolicy) || 'client-wins';
+  } catch {
+    return 'client-wins';
+  }
+}
+
+export function setConflictPolicy(policy: ConflictPolicy): void {
+  try {
+    localStorage.setItem(STORAGE_CONFLICT_POLICY, policy);
+  } catch (err) {
+    console.warn('Failed to save conflict policy:', err);
+  }
+}
+
+let isSyncingInternal = false;
+
+// Global online/offline network listeners
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    console.log('Network online restored. Triggering automatic background sync...');
+    window.dispatchEvent(new CustomEvent('hinunangan_connection_change'));
+    setTimeout(() => {
+      processSyncQueue().catch(err => console.warn('Auto-sync on network reconnect notice:', err));
+    }, 600);
+  });
+
+  window.addEventListener('offline', () => {
+    console.log('Device entered offline state.');
+    window.dispatchEvent(new CustomEvent('hinunangan_connection_change'));
+  });
+}
 
 export function loadSyncQueue(): SyncQueueItem[] {
   try {
@@ -26,13 +64,32 @@ export function loadSyncQueue(): SyncQueueItem[] {
   }
 }
 
+export function getPendingSyncRecordIds(): Set<string> {
+  const queue = loadSyncQueue();
+  const pendingSet = new Set<string>();
+  queue.forEach(item => {
+    if (item.status === 'pending' || item.status === 'error') {
+      pendingSet.add(item.recordId);
+    }
+  });
+  return pendingSet;
+}
+
+export function isRecordPendingSync(recordId: string): boolean {
+  const queue = loadSyncQueue();
+  return queue.some(item => (item.status === 'pending' || item.status === 'error') && item.recordId === recordId);
+}
+
 export function saveSyncQueue(queue: SyncQueueItem[]): void {
   try {
     localStorage.setItem(STORAGE_SYNC_QUEUE, JSON.stringify(queue));
+    // Asynchronously replicate to durable IndexedDB store
+    saveSyncQueueToIdb(queue).catch(err => console.warn('IndexedDB sync queue error:', err));
     // Dispatch custom event so all open tabs/components stay reactive
     window.dispatchEvent(new CustomEvent('hinunangan_sync_queue_updated', { detail: queue }));
   } catch (err) {
     console.error('Failed to save sync queue', err);
+    saveSyncQueueToIdb(queue).catch(idbErr => console.error('IndexedDB backup error:', idbErr));
   }
 }
 
@@ -51,6 +108,13 @@ export function getSimulateOffline(): boolean {
 export function setSimulateOffline(simulate: boolean): void {
   localStorage.setItem(STORAGE_SIMULATE_OFFLINE, simulate ? 'true' : 'false');
   window.dispatchEvent(new CustomEvent('hinunangan_connection_change'));
+  
+  // If turning offline simulation OFF (restoring online mode), immediately trigger auto-sync
+  if (!simulate) {
+    setTimeout(() => {
+      processSyncQueue().catch(err => console.warn('Auto-sync after reconnecting notice:', err));
+    }, 100);
+  }
 }
 
 export interface EnqueueSyncOptions {
@@ -117,6 +181,16 @@ export function enqueueSyncAction(
 
   const updatedQueue = [newItem, ...currentQueue];
   saveSyncQueue(updatedQueue);
+
+  // Auto-sync live immediately when online
+  const isSimOffline = getSimulateOffline();
+  const isPhysOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  if (isPhysOnline && !isSimOffline) {
+    setTimeout(() => {
+      processSyncQueue().catch(err => console.warn('Auto-sync live upload notice:', err));
+    }, 50);
+  }
+
   return newItem;
 }
 
@@ -197,127 +271,136 @@ export async function syncWithCloudFirestore(): Promise<{ pigs: PigRecord[]; use
  * Applies mutations cleanly to both local cache and Cloud database.
  */
 export async function processSyncQueue(targetId?: string): Promise<SyncProcessResult> {
-  const queue = loadSyncQueue();
-  const itemsToSync = targetId ? queue.filter(q => q.id === targetId) : queue.filter(q => q.status === 'pending' || q.status === 'error');
-
-  if (itemsToSync.length === 0) {
+  if (isSyncingInternal) {
     return { totalProcessed: 0, successCount: 0, failedCount: 0, results: [] };
   }
 
-  const isSimOffline = getSimulateOffline();
-  const isPhysOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
-  const canSendToCloud = isPhysOnline && !isSimOffline;
+  isSyncingInternal = true;
+  try {
+    const queue = loadSyncQueue();
+    const itemsToSync = targetId ? queue.filter(q => q.id === targetId) : queue.filter(q => q.status === 'pending' || q.status === 'error');
 
-  let currentPigs = loadStoredPigs();
-  let currentUsers = loadStoredUsers();
-  
-  let successCount = 0;
-  let failedCount = 0;
-  const results: { id: string; success: boolean; message: string }[] = [];
-
-  const updatedQueue = [...queue];
-
-  for (let i = 0; i < updatedQueue.length; i++) {
-    const item = updatedQueue[i];
-    if (targetId && item.id !== targetId) continue;
-    if (!targetId && item.status === 'synced') continue;
-
-    try {
-      if (item.entityType === 'pig') {
-        const pigData = item.data as PigRecord;
-
-        if (item.action === 'create') {
-          const existingIdx = currentPigs.findIndex(p => p.id === item.recordId || p.earTag === pigData.earTag);
-          if (existingIdx >= 0) {
-            currentPigs[existingIdx] = pigData;
-          } else {
-            currentPigs = [pigData, ...currentPigs];
-          }
-          if (canSendToCloud) {
-            await savePigToCloud(pigData);
-          }
-        } else if (item.action === 'update') {
-          const idx = currentPigs.findIndex(p => p.id === item.recordId);
-          if (idx >= 0) {
-            currentPigs[idx] = { ...currentPigs[idx], ...pigData };
-            if (canSendToCloud) {
-              await savePigToCloud(currentPigs[idx]);
-            }
-          } else {
-            currentPigs = [pigData as PigRecord, ...currentPigs];
-            if (canSendToCloud) {
-              await savePigToCloud(pigData as PigRecord);
-            }
-          }
-        } else if (item.action === 'delete') {
-          currentPigs = currentPigs.filter(p => p.id !== item.recordId);
-          if (canSendToCloud) {
-            await deletePigFromCloud(item.recordId);
-          }
-        }
-      } else if (item.entityType === 'user') {
-        const userData = item.data as User;
-        if (item.action === 'create' || item.action === 'update') {
-          const idx = currentUsers.findIndex(u => u.username.toLowerCase() === userData.username.toLowerCase());
-          if (idx >= 0) {
-            currentUsers[idx] = userData;
-          } else {
-            currentUsers = [...currentUsers, userData];
-          }
-          if (canSendToCloud) {
-            await saveUserToCloud(userData);
-          }
-        } else if (item.action === 'delete') {
-          currentUsers = currentUsers.filter(u => u.username.toLowerCase() !== item.recordId.toLowerCase());
-        }
-      }
-
-      successCount++;
-      results.push({ 
-        id: item.id, 
-        success: true, 
-        message: canSendToCloud 
-          ? 'Synchronized successfully to Firebase Firestore Cloud' 
-          : 'Applied to local storage (queued for Cloud connection)' 
-      });
-
-      updatedQueue[i] = {
-        ...item,
-        status: 'synced' as const,
-        lastAttempt: new Date().toISOString(),
-        errorMessage: undefined
-      };
-    } catch (err) {
-      failedCount++;
-      const errMsg = (err as Error).message || 'Sync error';
-      results.push({ id: item.id, success: false, message: errMsg });
-      updatedQueue[i] = {
-        ...item,
-        status: 'error' as const,
-        retryCount: (item.retryCount || 0) + 1,
-        lastAttempt: new Date().toISOString(),
-        errorMessage: errMsg
-      };
+    if (itemsToSync.length === 0) {
+      return { totalProcessed: 0, successCount: 0, failedCount: 0, results: [] };
     }
+
+    const isSimOffline = getSimulateOffline();
+    const isPhysOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    const canSendToCloud = isPhysOnline && !isSimOffline;
+
+    let currentPigs = loadStoredPigs();
+    let currentUsers = loadStoredUsers();
+    
+    let successCount = 0;
+    let failedCount = 0;
+    const results: { id: string; success: boolean; message: string }[] = [];
+
+    const updatedQueue = [...queue];
+
+    for (let i = 0; i < updatedQueue.length; i++) {
+      const item = updatedQueue[i];
+      if (targetId && item.id !== targetId) continue;
+      if (!targetId && item.status === 'synced') continue;
+
+      try {
+        if (item.entityType === 'pig') {
+          const pigData = item.data as PigRecord;
+
+          if (item.action === 'create') {
+            const existingIdx = currentPigs.findIndex(p => p.id === item.recordId || p.earTag === pigData.earTag);
+            if (existingIdx >= 0) {
+              currentPigs[existingIdx] = pigData;
+            } else {
+              currentPigs = [pigData, ...currentPigs];
+            }
+            if (canSendToCloud) {
+              await savePigToCloud(pigData);
+            }
+          } else if (item.action === 'update') {
+            const idx = currentPigs.findIndex(p => p.id === item.recordId);
+            if (idx >= 0) {
+              currentPigs[idx] = { ...currentPigs[idx], ...pigData };
+              if (canSendToCloud) {
+                await savePigToCloud(currentPigs[idx]);
+              }
+            } else {
+              currentPigs = [pigData as PigRecord, ...currentPigs];
+              if (canSendToCloud) {
+                await savePigToCloud(pigData as PigRecord);
+              }
+            }
+          } else if (item.action === 'delete') {
+            currentPigs = currentPigs.filter(p => p.id !== item.recordId);
+            if (canSendToCloud) {
+              await deletePigFromCloud(item.recordId);
+            }
+          }
+        } else if (item.entityType === 'user') {
+          const userData = item.data as User;
+          if (item.action === 'create' || item.action === 'update') {
+            const idx = currentUsers.findIndex(u => u.username.toLowerCase() === userData.username.toLowerCase());
+            if (idx >= 0) {
+              currentUsers[idx] = userData;
+            } else {
+              currentUsers = [...currentUsers, userData];
+            }
+            if (canSendToCloud) {
+              await saveUserToCloud(userData);
+            }
+          } else if (item.action === 'delete') {
+            currentUsers = currentUsers.filter(u => u.username.toLowerCase() !== item.recordId.toLowerCase());
+          }
+        }
+
+        successCount++;
+        results.push({ 
+          id: item.id, 
+          success: true, 
+          message: canSendToCloud 
+            ? 'Synchronized successfully to Firebase Firestore Cloud' 
+            : 'Applied to local storage (queued for Cloud connection)' 
+        });
+
+        updatedQueue[i] = {
+          ...item,
+          status: 'synced' as const,
+          lastAttempt: new Date().toISOString(),
+          errorMessage: undefined
+        };
+      } catch (err) {
+        failedCount++;
+        const errMsg = (err as Error).message || 'Sync error';
+        results.push({ id: item.id, success: false, message: errMsg });
+        updatedQueue[i] = {
+          ...item,
+          status: 'error' as const,
+          retryCount: (item.retryCount || 0) + 1,
+          lastAttempt: new Date().toISOString(),
+          errorMessage: errMsg
+        };
+      }
+    }
+
+    // Save updated local database
+    saveStoredPigs(currentPigs);
+    saveStoredUsers(currentUsers);
+    saveSyncQueue(updatedQueue);
+    setLastSyncTime(new Date().toISOString());
+
+    // Notify listeners
+    window.dispatchEvent(new CustomEvent('hinunangan_data_synced', { 
+      detail: { timestamp: new Date().toISOString(), successCount } 
+    }));
+
+    return {
+      totalProcessed: itemsToSync.length,
+      successCount,
+      failedCount,
+      results
+    };
+  } finally {
+    isSyncingInternal = false;
   }
-
-  // Save updated local database
-  saveStoredPigs(currentPigs);
-  saveStoredUsers(currentUsers);
-  saveSyncQueue(updatedQueue);
-  setLastSyncTime(new Date().toISOString());
-
-  // Notify listeners
-  window.dispatchEvent(new CustomEvent('hinunangan_data_synced', { 
-    detail: { timestamp: new Date().toISOString(), successCount } 
-  }));
-
-  return {
-    totalProcessed: itemsToSync.length,
-    successCount,
-    failedCount,
-    results
-  };
 }
 
 export function exportSyncQueuePackage(queue: SyncQueueItem[]): void {

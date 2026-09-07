@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import '../services/leafletInit';
 import * as L from 'leaflet';
 import { 
   MapPin, 
@@ -9,7 +10,15 @@ import {
   AlertCircle,
   HelpCircle
 } from 'lucide-react';
-import { BARANGAY_COORDS_MAP, getClosestBarangay, HINUNANGAN_LEAFLET_MAX_BOUNDS } from '../data/constants';
+import { 
+  BARANGAY_COORDS_MAP, 
+  getClosestBarangay, 
+  HINUNANGAN_LEAFLET_MAX_BOUNDS,
+  HINUNANGAN_MUNICIPAL_BOUNDARY,
+  SAN_PEDRO_ISLAND_BOUNDARY,
+  SAN_PABLO_ISLAND_BOUNDARY,
+  isWithinHinunanganBoundary
+} from '../data/constants';
 import { GeolocationHookReturn } from '../hooks/useGeolocation';
 
 interface GisFormMapProps {
@@ -47,10 +56,12 @@ export const GisFormMap: React.FC<GisFormMapProps> = ({
   const markerRef = useRef<L.Marker | null>(null);
   const circleRef = useRef<L.Circle | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const boundaryLayerRef = useRef<L.LayerGroup | null>(null);
 
   const [tileMode, setTileMode] = useState<'standard' | 'satellite'>('standard');
   const [gpsLocating, setGpsLocating] = useState(false);
   const [detectedBrgy, setDetectedBrgy] = useState<string>('');
+  const [boundaryWarning, setBoundaryWarning] = useState<string | null>(null);
 
   // Update closest barangay
   useEffect(() => {
@@ -118,6 +129,35 @@ export const GisFormMap: React.FC<GisFormMapProps> = ({
     }).addTo(map);
     circleRef.current = circle;
 
+    // Hinunangan Municipal Boundary Polygon Overlay
+    const boundaryGroup = L.layerGroup().addTo(map);
+    const boundaryPolygon = L.polygon(HINUNANGAN_MUNICIPAL_BOUNDARY, {
+      color: '#1E3F2B',
+      weight: 2,
+      dashArray: '6, 4',
+      fillColor: '#2F5C3F',
+      fillOpacity: 0.03
+    });
+    boundaryGroup.addLayer(boundaryPolygon);
+
+    const sanPedro = L.polygon(SAN_PEDRO_ISLAND_BOUNDARY, {
+      color: '#D9A441',
+      weight: 1.5,
+      dashArray: '4, 4',
+      fillColor: '#D9A441',
+      fillOpacity: 0.06
+    });
+    const sanPablo = L.polygon(SAN_PABLO_ISLAND_BOUNDARY, {
+      color: '#D9A441',
+      weight: 1.5,
+      dashArray: '4, 4',
+      fillColor: '#D9A441',
+      fillOpacity: 0.06
+    });
+    boundaryGroup.addLayer(sanPedro);
+    boundaryGroup.addLayer(sanPablo);
+    boundaryLayerRef.current = boundaryGroup;
+
     // Drag events
     marker.on('drag', (e) => {
       const pos = (e.target as L.Marker).getLatLng();
@@ -126,17 +166,37 @@ export const GisFormMap: React.FC<GisFormMapProps> = ({
 
     marker.on('dragend', (e) => {
       const pos = (e.target as L.Marker).getLatLng();
+      const validation = isWithinHinunanganBoundary(pos.lat, pos.lng);
+      if (!validation.isInside) {
+        setBoundaryWarning('Swine registrations are restricted to Hinunangan municipality boundaries.');
+        // Revert to previous valid lat/lng
+        marker.setLatLng([lat, lng]);
+        circle.setLatLng([lat, lng]);
+        setTimeout(() => setBoundaryWarning(null), 4000);
+        return;
+      }
+      setBoundaryWarning(null);
       circle.setLatLng(pos);
       onChangeCoordinates({
         lat: Number(pos.lat.toFixed(6)),
         lng: Number(pos.lng.toFixed(6)),
         accuracy: 3.0
       });
+      if (validation.barangay && onSyncBarangay && validation.barangay !== barangay) {
+        onSyncBarangay(validation.barangay);
+      }
     });
 
     // Map click reposition
     map.on('click', (e: L.LeafletMouseEvent) => {
       const { lat: clickLat, lng: clickLng } = e.latlng;
+      const validation = isWithinHinunanganBoundary(clickLat, clickLng);
+      if (!validation.isInside) {
+        setBoundaryWarning('Swine registrations are restricted to Hinunangan municipality boundaries.');
+        setTimeout(() => setBoundaryWarning(null), 4000);
+        return;
+      }
+      setBoundaryWarning(null);
       marker.setLatLng([clickLat, clickLng]);
       circle.setLatLng([clickLat, clickLng]);
       onChangeCoordinates({
@@ -144,18 +204,30 @@ export const GisFormMap: React.FC<GisFormMapProps> = ({
         lng: Number(clickLng.toFixed(6)),
         accuracy: 3.0
       });
+      if (validation.barangay && onSyncBarangay && validation.barangay !== barangay) {
+        onSyncBarangay(validation.barangay);
+      }
     });
 
     mapInstanceRef.current = map;
 
     // Ensure proper sizing
-    setTimeout(() => {
-      map.invalidateSize();
+    const sizeTimer = setTimeout(() => {
+      if (mapInstanceRef.current && (mapInstanceRef.current as any)._mapPane) {
+        mapInstanceRef.current.invalidateSize();
+      }
     }, 200);
 
     return () => {
-      map.remove();
-      mapInstanceRef.current = null;
+      clearTimeout(sizeTimer);
+      if (mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.remove();
+        } catch {
+          // Ignore teardown issues
+        }
+        mapInstanceRef.current = null;
+      }
       markerRef.current = null;
       circleRef.current = null;
     };
@@ -279,6 +351,14 @@ export const GisFormMap: React.FC<GisFormMapProps> = ({
       <div className="relative rounded-xl overflow-hidden border border-[#DED2AE] shadow-inner bg-[#EAE1C4]">
         <div ref={mapContainerRef} className="w-full h-56 z-0" />
         
+        {/* Boundary Warning Alert */}
+        {boundaryWarning && (
+          <div className="absolute top-2 left-2 right-2 z-20 bg-[#3D1418]/95 border border-rose-500 text-white px-3 py-1.5 rounded-xl shadow-lg backdrop-blur-xs flex items-center gap-2 text-xs">
+            <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+            <span className="text-[11px] font-medium leading-tight">{boundaryWarning}</span>
+          </div>
+        )}
+
         {/* Floating guidance overlay */}
         <div className="absolute bottom-2 left-2 z-10 bg-white/90 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-[#DED2AE] text-[10px] text-[#55604F] flex items-center gap-1.5 pointer-events-none shadow-xs">
           <HelpCircle className="w-3 h-3 text-[#2F5C3F]" />
@@ -286,7 +366,7 @@ export const GisFormMap: React.FC<GisFormMapProps> = ({
         </div>
 
         {/* Nearest barangay badge */}
-        {detectedBrgy && (
+        {!boundaryWarning && detectedBrgy && (
           <div className="absolute top-2 left-2 z-10 bg-[#203F2B]/90 text-white backdrop-blur-xs px-2.5 py-1 rounded-lg text-[10px] font-mono flex items-center gap-1.5 shadow-sm">
             <span>Nearest Barangay: <b>{detectedBrgy}</b></span>
             {onSyncBarangay && detectedBrgy !== barangay && (

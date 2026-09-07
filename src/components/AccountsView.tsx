@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   UserPlus, 
   Users, 
@@ -26,7 +27,8 @@ import {
   Send
 } from 'lucide-react';
 import { BARANGAYS_DATA } from '../data/constants';
-import { PigRecord, User, SyncQueueItem } from '../types';
+import { PigRecord, User, SyncQueueItem, SystemSettings } from '../types';
+import { compressImageToBase64 } from '../services/imageUpload';
 import { 
   downloadJsonBackup, 
   parseAndValidateBackupJson, 
@@ -49,6 +51,8 @@ interface AccountsViewProps {
   onToggleSimulateOffline?: () => void;
   onTriggerSync?: () => Promise<void>;
   isSyncing?: boolean;
+  systemSettings?: SystemSettings;
+  onUpdateSettings?: (settings: SystemSettings) => void;
 }
 
 export const AccountsView: React.FC<AccountsViewProps> = ({
@@ -64,9 +68,15 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
   isSimulatedOffline = false,
   onToggleSimulateOffline,
   onTriggerSync,
-  isSyncing = false
+  isSyncing = false,
+  systemSettings = {},
+  onUpdateSettings
 }) => {
-  const [activeTab, setActiveTab] = useState<'accounts' | 'backup' | 'sync'>('accounts');
+  const [activeTab, setActiveTab] = useState<'accounts' | 'backup' | 'sync' | 'settings'>('accounts');
+  const [settingsForm, setSettingsForm] = useState<SystemSettings>(systemSettings);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsMsg, setSettingsMsg] = useState('');
+
 
   // Account creation form state
   const [fullName, setFullName] = useState('');
@@ -75,6 +85,7 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
   const [barangay, setBarangay] = useState(BARANGAYS_DATA[0].name);
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -132,6 +143,7 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
     setUsername('');
     setEmail('');
     setPhone('');
+    setAvatarUrl('');
     setTimeout(() => setSuccessMsg(null), 3500);
   };
 
@@ -244,56 +256,105 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('accounts')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            className={`relative px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer ${
               activeTab === 'accounts'
-                ? 'bg-[#2F5C3F] text-white shadow-xs'
+                ? 'text-white'
                 : 'text-[#55604F] hover:text-[#1E2B1F]'
             }`}
           >
-            <Users className="w-4 h-4" />
-            <span>Focal Accounts ({users.length})</span>
+            {activeTab === 'accounts' && (
+              <motion.div
+                layoutId="activeAccountsTabPill"
+                className="absolute inset-0 bg-[#2F5C3F] rounded-lg shadow-xs"
+                transition={{ type: "spring", stiffness: 400, damping: 32 }}
+              />
+            )}
+            <Users className="w-4 h-4 relative z-10" />
+            <span className="relative z-10">Focal Accounts ({users.length})</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('backup')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            className={`relative px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer ${
               activeTab === 'backup'
-                ? 'bg-[#2F5C3F] text-white shadow-xs'
+                ? 'text-white'
                 : 'text-[#55604F] hover:text-[#1E2B1F]'
             }`}
           >
-            <Database className="w-4 h-4 text-[#D9A441]" />
-            <span>Backup &amp; Restore</span>
+            {activeTab === 'backup' && (
+              <motion.div
+                layoutId="activeAccountsTabPill"
+                className="absolute inset-0 bg-[#2F5C3F] rounded-lg shadow-xs"
+                transition={{ type: "spring", stiffness: 400, damping: 32 }}
+              />
+            )}
+            <Database className="w-4 h-4 text-[#D9A441] relative z-10" />
+            <span className="relative z-10">Backup &amp; Restore</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('sync')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative ${
+            className={`relative px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer ${
               activeTab === 'sync'
-                ? 'bg-[#2F5C3F] text-white shadow-xs'
+                ? 'text-white'
                 : 'text-[#55604F] hover:text-[#1E2B1F]'
             }`}
           >
-            <Radio className={`w-4 h-4 ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`} />
-            <span>Offline Sync</span>
+            {activeTab === 'sync' && (
+              <motion.div
+                layoutId="activeAccountsTabPill"
+                className="absolute inset-0 bg-[#2F5C3F] rounded-lg shadow-xs"
+                transition={{ type: "spring", stiffness: 400, damping: 32 }}
+              />
+            )}
+            <Radio className={`w-4 h-4 relative z-10 ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`} />
+            <span className="relative z-10">Offline Sync</span>
             {syncQueue.filter(q => q.status === 'pending').length > 0 && (
-              <span className="ml-0.5 px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-bold">
+              <span className="ml-0.5 px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-bold relative z-10">
                 {syncQueue.filter(q => q.status === 'pending').length}
               </span>
             )}
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('settings')}
+            className={`relative px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer ${
+              activeTab === 'settings'
+                ? 'text-white'
+                : 'text-[#55604F] hover:text-[#1E2B1F]'
+            }`}
+          >
+            {activeTab === 'settings' && (
+              <motion.div
+                layoutId="activeAccountsTabPill"
+                className="absolute inset-0 bg-[#2F5C3F] rounded-lg shadow-xs"
+                transition={{ type: "spring", stiffness: 400, damping: 32 }}
+              />
+            )}
+            <Shield className="w-4 h-4 relative z-10" />
+            <span className="relative z-10">Landing Page & CMS</span>
+          </button>
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* TAB 1: ACCOUNTS MANAGEMENT                                                */}
-      {/* ========================================================================= */}
-      {activeTab === 'accounts' && (
-        <>
-          {/* CREATE NEW ACCOUNT FORM */}
-          <div className="bg-white border border-[#DED2AE] rounded-2xl p-6 shadow-xs">
+      <AnimatePresence mode="wait" initial={false}>
+        {/* ========================================================================= */}
+        {/* TAB 1: ACCOUNTS MANAGEMENT                                                */}
+        {/* ========================================================================= */}
+        {activeTab === 'accounts' && (
+          <motion.div
+            key="tab-accounts"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18 }}
+            className="space-y-6"
+          >
+            {/* CREATE NEW ACCOUNT FORM */}
+            <div className="bg-white border border-[#DED2AE] rounded-2xl p-6 shadow-xs">
             <div className="flex items-center gap-2 mb-4 pb-3 border-b border-[#EAE1C4]">
               <UserPlus className="w-5 h-5 text-[#2F5C3F]" />
               <h3 className="font-serif text-lg font-bold text-[#203F2B]">Create Focal Person Account</h3>
@@ -485,14 +546,21 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
               </table>
             </div>
           </div>
-        </>
+        </motion.div>
       )}
 
       {/* ========================================================================= */}
       {/* TAB 2: LOCAL STORAGE BACKUP & RESTORE UTILITY                             */}
       {/* ========================================================================= */}
       {activeTab === 'backup' && (
-        <div className="space-y-6">
+        <motion.div
+          key="tab-backup"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+          className="space-y-6"
+        >
 
           {/* SYSTEM HEALTH & STORAGE STATUS CARDS */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -789,14 +857,21 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
             </div>
           </div>
 
-        </div>
+        </motion.div>
       )}
 
       {/* ========================================================================= */}
       {/* TAB 3: OFFLINE SYNC & FIELD QUEUE HUB                                     */}
       {/* ========================================================================= */}
       {activeTab === 'sync' && (
-        <div className="space-y-6">
+        <motion.div
+          key="tab-sync"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+          className="space-y-6"
+        >
           
           {/* OFFLINE STATUS HERO */}
           <div className="bg-white border border-[#DED2AE] rounded-2xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -960,9 +1035,130 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
             )}
           </div>
 
-        </div>
+        </motion.div>
       )}
 
+      {/* TAB 4: SYSTEM SETTINGS (CMS) */}
+      {activeTab === 'settings' && (
+        <motion.div
+          key="tab-settings"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+          className="bg-white border border-[#DED2AE] rounded-2xl p-6 shadow-xs"
+        >
+          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-[#EAE1C4]">
+            <Shield className="w-5 h-5 text-[#2F5C3F]" />
+            <h3 className="font-serif text-lg font-bold text-[#203F2B]">Landing Page Settings & CMS</h3>
+          </div>
+
+          {settingsMsg && (
+            <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{settingsMsg}</span>
+            </div>
+          )}
+
+          <div className="space-y-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                  Hero Title
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Swine Registry System"
+                  value={settingsForm.landingHeroTitle || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, landingHeroTitle: e.target.value })}
+                  className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 focus:bg-white focus:border-[#2F5C3F] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                  Hero Subtitle
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Official local government portal..."
+                  value={settingsForm.landingHeroSubtitle || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, landingHeroSubtitle: e.target.value })}
+                  className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 focus:bg-white focus:border-[#2F5C3F] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                  Facebook URL
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://facebook.com/..."
+                  value={settingsForm.facebookUrl || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, facebookUrl: e.target.value })}
+                  className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 focus:bg-white focus:border-[#2F5C3F] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                  Twitter/X URL
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://twitter.com/..."
+                  value={settingsForm.twitterUrl || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, twitterUrl: e.target.value })}
+                  className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 focus:bg-white focus:border-[#2F5C3F] outline-none"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                  Hero Photo Upload
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const base64 = await compressImageToBase64(file, 1200);
+                      setSettingsForm({ ...settingsForm, landingHeroPhotoUrl: base64 });
+                    }
+                  }}
+                  className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 focus:bg-white focus:border-[#2F5C3F] outline-none"
+                />
+                {settingsForm.landingHeroPhotoUrl && (
+                  <img src={settingsForm.landingHeroPhotoUrl} className="mt-2 h-24 object-cover rounded-xl" alt="Preview" />
+                )}
+              </div>
+            </div>
+
+            <div className="pt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsSavingSettings(true);
+                  if (onUpdateSettings) {
+                    await onUpdateSettings(settingsForm);
+                  }
+                  setSettingsMsg('Settings updated successfully!');
+                  setTimeout(() => setSettingsMsg(''), 3000);
+                  setIsSavingSettings(false);
+                }}
+                disabled={isSavingSettings}
+                className="px-6 py-2.5 bg-[#203F2B] hover:bg-[#2F5C3F] text-white font-bold rounded-xl flex items-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+              >
+                <Send className="w-4 h-4" />
+                <span>{isSavingSettings ? 'Saving...' : 'Save Settings'}</span>
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+      </AnimatePresence>
     </div>
   );
 };

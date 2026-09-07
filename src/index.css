@@ -1,1 +1,33 @@
 @import "tailwindcss";
+
+/* Custom Leaflet Tooltips & Overlays for High-Precision GIS Inspection */
+.leaflet-tooltip.gis-custom-tooltip {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.leaflet-tooltip.gis-custom-tooltip::before,
+.leaflet-tooltip.gis-custom-tooltip::after {
+  display: none !important;
+}
+
+/* Custom animation for hover pulses */
+@keyframes pulse-subtle {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.85; }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.animate-slideUp {
+  animation: slide-up 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

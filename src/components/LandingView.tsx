@@ -15,7 +15,9 @@ import {
   Sparkles
 } from 'lucide-react';
 import { BARANGAYS_DATA, HINUNANGAN_CENTER } from '../data/constants';
-import { PigRecord } from '../types';
+import { PigRecord, SystemSettings } from '../types';
+import { useI18n } from '../i18n/I18nContext';
+import { LanguageToggle } from './LanguageToggle';
 
 interface LandingViewProps {
   pigs: PigRecord[];
@@ -26,8 +28,10 @@ interface LandingViewProps {
 export const LandingView: React.FC<LandingViewProps> = ({
   pigs,
   onOpenLogin,
-  onExploreProgram
+  onExploreProgram,
+  systemSettings = {} as SystemSettings
 }) => {
+  const { t } = useI18n();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [selectedBrgyFilter, setSelectedBrgyFilter] = useState<'all' | 'coastal' | 'inland'>('all');
 
@@ -70,18 +74,21 @@ export const LandingView: React.FC<LandingViewProps> = ({
 
           {/* Desktop Nav Links */}
           <div className="hidden md:flex items-center gap-8 text-xs font-bold text-[#55604F]">
-            <a href="#services" className="hover:text-[#2F5C3F] transition-colors">Programs &amp; Services</a>
-            <a href="#about" className="hover:text-[#2F5C3F] transition-colors">About Office</a>
+            <a href="#services" className="hover:text-[#2F5C3F] transition-colors">{t('landing.navServices')}</a>
+            <a href="#about" className="hover:text-[#2F5C3F] transition-colors">{t('landing.navAbout')}</a>
             <a href="#barangays" className="hover:text-[#2F5C3F] transition-colors">40 Barangays</a>
-            <a href="#contact" className="hover:text-[#2F5C3F] transition-colors">Contact</a>
+            <a href="#contact" className="hover:text-[#2F5C3F] transition-colors">{t('landing.contactUs')}</a>
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Language Switcher Pill */}
+            <LanguageToggle variant="landing" />
+
             <button
               onClick={onOpenLogin}
               className="flex items-center gap-2 bg-[#2F5C3F] hover:bg-[#203F2B] text-white px-4 py-2 rounded-full font-bold text-xs shadow-md transition-transform active:scale-95 cursor-pointer"
             >
-              <span>Staff &amp; Focal Login</span>
+              <span>{t('landing.loginBtn')}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
 
@@ -103,10 +110,13 @@ export const LandingView: React.FC<LandingViewProps> = ({
         {/* Mobile Dropdown */}
         {mobileMenuOpen && (
           <div className="md:hidden bg-[#F5EFDD] border-b border-[#DED2AE] px-6 py-4 space-y-3 text-sm font-semibold">
-            <a href="#services" onClick={() => setMobileMenuOpen(false)} className="block py-1 text-[#55604F]">Programs &amp; Services</a>
-            <a href="#about" onClick={() => setMobileMenuOpen(false)} className="block py-1 text-[#55604F]">About Office</a>
+            <div className="pb-2 border-b border-[#DED2AE]">
+              <LanguageToggle variant="sidebar" />
+            </div>
+            <a href="#services" onClick={() => setMobileMenuOpen(false)} className="block py-1 text-[#55604F]">{t('landing.navServices')}</a>
+            <a href="#about" onClick={() => setMobileMenuOpen(false)} className="block py-1 text-[#55604F]">{t('landing.navAbout')}</a>
             <a href="#barangays" onClick={() => setMobileMenuOpen(false)} className="block py-1 text-[#55604F]">40 Barangays</a>
-            <a href="#contact" onClick={() => setMobileMenuOpen(false)} className="block py-1 text-[#55604F]">Contact</a>
+            <a href="#contact" onClick={() => setMobileMenuOpen(false)} className="block py-1 text-[#55604F]">{t('landing.contactUs')}</a>
           </div>
         )}
       </nav>
@@ -122,11 +132,11 @@ export const LandingView: React.FC<LandingViewProps> = ({
             </div>
 
             <h1 className="font-serif text-4xl sm:text-5xl lg:text-6xl font-bold text-[#203F2B] leading-[1.08] tracking-tight">
-              Rice Granary of Southern Leyte, now registering every <em className="italic text-[#A85C32]">backyard herd</em>.
+              {systemSettings.landingHeroTitle || 'Rice Granary of Southern Leyte, now registering every backyard herd.'}
             </h1>
 
             <p className="text-base sm:text-lg text-[#55604F] leading-relaxed max-w-xl">
-              The official Swine Registration &amp; Livestock Management System of Hinunangan's Municipal Agriculture Office — connecting all 40 barangays to track herd health, guide biosecurity response, and empower local hog raisers.
+              {systemSettings.landingHeroSubtitle || 'The official Swine Registration & Livestock Management System of Hinunangan\'s Municipal Agriculture Office — connecting all 40 barangays to track herd health, guide biosecurity response, and empower local hog raisers.'}
             </p>
 
             <div className="flex flex-wrap items-center gap-3.5 pt-2">
@@ -170,23 +180,27 @@ export const LandingView: React.FC<LandingViewProps> = ({
 
           {/* Right Hero Image Card */}
           <div className="lg:col-span-5">
-            <div className="bg-white border border-[#DED2AE] rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
-              <div className="space-y-4">
-                <div className="w-12 h-12 rounded-2xl bg-[#F5EFDD] text-[#2F5C3F] flex items-center justify-center font-bold">
-                  <ShieldCheck className="w-6 h-6" />
-                </div>
-                <h3 className="font-serif text-xl font-bold text-[#203F2B]">
-                  Municipal Biosecurity &amp; Swine Census
-                </h3>
-                <p className="text-xs text-[#55604F] leading-relaxed">
-                  Real-time recording of swine ear tags, vaccination status, owner profiles, and breed distribution across all 40 barangays in Hinunangan.
-                </p>
-                <div className="pt-2 border-t border-[#EAE1C4] flex items-center justify-between text-xs font-bold text-[#2F5C3F]">
-                  <span>Office of the Municipal Agriculturist</span>
-                  <span>Province of Southern Leyte</span>
+            {systemSettings?.landingHeroPhotoUrl ? (
+              <img src={systemSettings.landingHeroPhotoUrl} alt="Hero" className="w-full h-auto aspect-square object-cover rounded-3xl shadow-xl border border-[#DED2AE]" />
+            ) : (
+              <div className="bg-white border border-[#DED2AE] rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
+                <div className="space-y-4">
+                  <div className="w-12 h-12 rounded-2xl bg-[#F5EFDD] text-[#2F5C3F] flex items-center justify-center font-bold">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <h3 className="font-serif text-xl font-bold text-[#203F2B]">
+                    Municipal Biosecurity &amp; Swine Census
+                  </h3>
+                  <p className="text-xs text-[#55604F] leading-relaxed">
+                    Real-time recording of swine ear tags, vaccination status, owner profiles, and breed distribution across all 40 barangays in Hinunangan.
+                  </p>
+                  <div className="pt-2 border-t border-[#EAE1C4] flex items-center justify-between text-xs font-bold text-[#2F5C3F]">
+                    <span>Office of the Municipal Agriculturist</span>
+                    <span>Province of Southern Leyte</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
         </div>
@@ -392,6 +406,15 @@ export const LandingView: React.FC<LandingViewProps> = ({
                 <a href="#services" className="block hover:text-white transition-colors">Programs &amp; Services</a>
                 <a href="#about" className="block hover:text-white transition-colors">About the Office</a>
                 <a href="#barangays" className="block hover:text-white transition-colors">40 Barangays Directory</a>
+                {systemSettings?.facebookUrl && (
+                  <a href={systemSettings.facebookUrl} target="_blank" rel="noreferrer" className="block text-emerald-400 hover:text-white transition-colors">Facebook Page</a>
+                )}
+                {systemSettings?.twitterUrl && (
+                  <a href={systemSettings.twitterUrl} target="_blank" rel="noreferrer" className="block text-emerald-400 hover:text-white transition-colors">Twitter / X</a>
+                )}
+                {systemSettings?.documentationUrl && (
+                  <a href={systemSettings.documentationUrl} target="_blank" rel="noreferrer" className="block text-emerald-400 hover:text-white transition-colors">Documentation</a>
+                )}
               </div>
             </div>
 
@@ -402,6 +425,9 @@ export const LandingView: React.FC<LandingViewProps> = ({
                 <p>Hotline: (053) 572-8812</p>
                 <p>Mobile: 0917-822-4911</p>
                 <p>agri.hinunangan@southernleyte.gov.ph</p>
+                {systemSettings?.contactEmail && (
+                  <p className="text-emerald-300 break-all">{systemSettings.contactEmail}</p>
+                )}
               </div>
             </div>
 

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { BARANGAYS_DATA, PURPOSE_COLORS, PURPOSES } from '../data/constants';
 import { AppViewMode, PigRecord, User } from '../types';
+import { useI18n } from '../i18n/I18nContext';
 
 interface DashboardViewProps {
   pigs: PigRecord[];
@@ -32,6 +33,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigate,
   onOpenAddModal
 }) => {
+  const { t } = useI18n();
   const isAdmin = currentUser.role === 'admin';
   const scopedPigs = isAdmin
     ? (pigs || [])
@@ -40,6 +42,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const totalHeads = scopedPigs.length;
   const backyardCount = scopedPigs.filter(p => p.purpose === 'Backyard Raising').length;
   const vaccinatedCount = scopedPigs.filter(p => p.vaccinated).length;
+  const deceasedCount = scopedPigs.filter(p => p.isDeceased).length;
   const vaxPercentage = totalHeads > 0 ? Math.round((vaccinatedCount / totalHeads) * 100) : 0;
   
   const avgWeight = totalHeads > 0 
@@ -101,7 +104,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="flex items-center gap-2 bg-[#D9A441] hover:bg-[#B9852A] text-[#203F2B] px-4 py-2.5 rounded-xl font-bold text-xs shadow-md transition-transform active:scale-95 cursor-pointer"
             >
               <MapIcon className="w-4 h-4" />
-              <span>Open GIS Swine Map</span>
+              <span>{t('dashboard.openGisMap')}</span>
             </button>
 
             <button
@@ -109,7 +112,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="flex items-center gap-2 bg-white/20 hover:bg-white/30 text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-colors cursor-pointer"
             >
               <ClipboardList className="w-4 h-4" />
-              <span>View All Records</span>
+              <span>{t('dashboard.viewAllRecords')}</span>
             </button>
 
             <button
@@ -117,18 +120,48 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2.5 rounded-xl font-bold text-xs transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Add Registration</span>
+              <span>{t('dashboard.registerNewSwine')}</span>
             </button>
           </div>
         </div>
       </div>
+
+      {/* MORTALITY & OUTBREAK SURVEILLANCE BANNER */}
+      {deceasedCount > 0 && (
+        <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-rose-950 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-rose-200 text-rose-900 rounded-xl shrink-0">
+              <AlertTriangle className="w-5 h-5 text-rose-700 animate-pulse" />
+            </div>
+            <div>
+              <div className="font-bold text-sm text-rose-950 flex items-center gap-2">
+                <span>{deceasedCount} Swine Mortality Event(s) Reported</span>
+                <span className="bg-rose-200 text-rose-900 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border border-rose-300">
+                  BIOSECURITY ALERT
+                </span>
+              </div>
+              <p className="text-rose-800 text-[11px] mt-0.5">
+                Outbreak surveillance active. Review recorded swine deaths for potential ASF vectors &amp; quarantine protocols.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => onNavigate('records')}
+            className="flex items-center gap-1.5 bg-rose-800 hover:bg-rose-900 text-white px-3.5 py-2 rounded-xl font-bold transition-colors cursor-pointer shrink-0 shadow-2xs"
+          >
+            <span>Inspect Mortality Records</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* KPI METRIC CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         
         <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
           <div className="flex items-center justify-between text-[#55604F] mb-2">
-            <span className="font-mono text-xs font-bold uppercase tracking-wider">Total Registered</span>
+            <span className="font-mono text-xs font-bold uppercase tracking-wider">{t('dashboard.totalSwine')}</span>
             <PiggyBank className="w-5 h-5 text-[#2F5C3F]" />
           </div>
           <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B]">
@@ -141,7 +174,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
           <div className="flex items-center justify-between text-[#55604F] mb-2">
-            <span className="font-mono text-xs font-bold uppercase tracking-wider">Barangay Scope</span>
+            <span className="font-mono text-xs font-bold uppercase tracking-wider">{t('dashboard.barangaysCovered')}</span>
             <Building2 className="w-5 h-5 text-[#D9A441]" />
           </div>
           <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B]">
@@ -154,7 +187,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
           <div className="flex items-center justify-between text-[#55604F] mb-2">
-            <span className="font-mono text-xs font-bold uppercase tracking-wider">Vaccinated / Monitored</span>
+            <span className="font-mono text-xs font-bold uppercase tracking-wider">{t('dashboard.vaccinatedRatio')}</span>
             <ShieldCheck className="w-5 h-5 text-emerald-600" />
           </div>
           <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B]">
@@ -167,7 +200,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
           <div className="flex items-center justify-between text-[#55604F] mb-2">
-            <span className="font-mono text-xs font-bold uppercase tracking-wider">Average Weight</span>
+            <span className="font-mono text-xs font-bold uppercase tracking-wider">{t('dashboard.averageWeight')}</span>
             <Scale className="w-5 h-5 text-blue-600" />
           </div>
           <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B]">

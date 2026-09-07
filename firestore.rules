@@ -15,5 +15,10 @@ service cloud.firestore {
     match /syncLogs/{logId} {
       allow read, write: if true;
     }
+
+    // System settings
+    match /system/{docId} {
+      allow read, write: if true;
+    }
   }
 }

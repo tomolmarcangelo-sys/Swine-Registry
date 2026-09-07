@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   X, 
   Check, 
@@ -14,12 +14,19 @@ import {
   Users,
   CheckCircle2,
   Sliders,
-  Shield
+  Shield,
+  Camera,
+  Wifi,
+  WifiOff,
+  CloudCheck
 } from 'lucide-react';
 import { BARANGAYS_DATA, BARANGAY_COORDS_MAP, BREEDS, PURPOSES } from '../data/constants';
 import { GeolocationHookReturn } from '../hooks/useGeolocation';
 import { BiosecurityAssessment, BreedType, PigRecord, PurposeType, User } from '../types';
 import { GisFormMap } from './GisFormMap';
+import { compressImageToBase64 } from '../services/imageUpload';
+import { useI18n } from '../i18n/I18nContext';
+import { getSimulateOffline } from '../services/syncService';
 
 interface AddEditRecordModalProps {
   isOpen: boolean;
@@ -30,6 +37,7 @@ interface AddEditRecordModalProps {
   existingPigs: PigRecord[];
   initialCoords?: { lat: number; lng: number; barangay?: string } | null;
   geo?: GeolocationHookReturn;
+  isOnline?: boolean;
 }
 
 const DEFAULT_BIOSECURITY: BiosecurityAssessment = {
@@ -50,14 +58,20 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
   editingPig,
   existingPigs = [],
   initialCoords,
-  geo
+  geo,
+  isOnline: isOnlineProp
 }) => {
+  const { t } = useI18n();
+  const isOnline = isOnlineProp !== undefined 
+    ? isOnlineProp 
+    : (typeof navigator !== 'undefined' ? (navigator.onLine && !getSimulateOffline()) : true);
   const isAdmin = currentUser.role === 'admin';
   const defaultBarangay = editingPig?.barangay || initialCoords?.barangay || (isAdmin ? 'Poblacion' : currentUser.barangay || 'Poblacion');
 
   const [ownerName, setOwnerName] = useState(editingPig?.ownerName || '');
   const [contact, setContact] = useState(editingPig?.contact || '');
   const [address, setAddress] = useState(editingPig?.address || '');
+  const [photoUrl, setPhotoUrl] = useState(editingPig?.photoUrl || '');
   const [barangay, setBarangay] = useState(defaultBarangay);
   const [earTag, setEarTag] = useState(() => {
     if (editingPig?.earTag) return editingPig.earTag;
@@ -74,6 +88,9 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
   const [asfCleared, setAsfCleared] = useState(editingPig ? editingPig.asfCleared : true);
   const [dateRegistered, setDateRegistered] = useState(editingPig?.dateRegistered || new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState(editingPig?.notes || '');
+  const [isDeceased, setIsDeceased] = useState(editingPig?.isDeceased ?? false);
+  const [mortalityDate, setMortalityDate] = useState(editingPig?.mortalityDate || new Date().toISOString().slice(0, 10));
+  const [mortalityReason, setMortalityReason] = useState(editingPig?.mortalityReason || 'Suspected ASF Outbreak');
 
   // Biosecurity & Sanitation Assessment State
   const [biosecurity, setBiosecurity] = useState<BiosecurityAssessment>(() => {
@@ -106,35 +123,79 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
   });
   const [gpsAccuracy, setGpsAccuracy] = useState<number>(editingPig?.gpsAccuracy || 5.0);
 
-  // Sync state when editingPig or initialCoords changes
+  // Reset form to pristine state (or editing record state)
+  const resetToCleanState = useCallback(() => {
+    if (editingPig) {
+      setOwnerName(editingPig.ownerName || '');
+      setContact(editingPig.contact || '');
+      setAddress(editingPig.address || '');
+      setPhotoUrl(editingPig.photoUrl || '');
+      setBarangay(editingPig.barangay || defaultBarangay);
+      setEarTag(editingPig.earTag);
+      setBreed(editingPig.breed as BreedType || 'Native / Native-cross');
+      setSex(editingPig.sex || 'Female');
+      setAge(String(editingPig.age ?? '6'));
+      setWeight(String(editingPig.weight ?? '45.0'));
+      setPurpose(editingPig.purpose as PurposeType || 'Backyard Raising');
+      setVaccinated(editingPig.vaccinated ?? true);
+      setAsfCleared(editingPig.asfCleared ?? true);
+      setDateRegistered(editingPig.dateRegistered || new Date().toISOString().slice(0, 10));
+      setNotes(editingPig.notes || '');
+      setLat(String(editingPig.lat ?? 10.3969));
+      setLng(String(editingPig.lng ?? 125.1999));
+      setGpsAccuracy(editingPig.gpsAccuracy ?? 5.0);
+      setBiosecurity(editingPig.biosecurity || DEFAULT_BIOSECURITY);
+      setIsDeceased(editingPig.isDeceased ?? false);
+      setMortalityDate(editingPig.mortalityDate || new Date().toISOString().slice(0, 10));
+      setMortalityReason(editingPig.mortalityReason || 'Suspected ASF Outbreak');
+    } else {
+      const defBrgy = initialCoords?.barangay || (isAdmin ? 'Poblacion' : currentUser.barangay || 'Poblacion');
+      const brgyCode = defBrgy.slice(0, 3).toUpperCase();
+      const count = (existingPigs || []).filter(p => p.barangay === defBrgy).length;
+      setOwnerName('');
+      setContact('');
+      setAddress('');
+      setPhotoUrl('');
+      setBarangay(defBrgy);
+      setEarTag(`HGN-${brgyCode}-${101 + count}`);
+      setBreed('Native / Native-cross');
+      setSex('Female');
+      setAge('6');
+      setWeight('45.0');
+      setPurpose('Backyard Raising');
+      setVaccinated(true);
+      setAsfCleared(true);
+      setDateRegistered(new Date().toISOString().slice(0, 10));
+      setNotes('');
+      const bCoord = BARANGAY_COORDS_MAP[defBrgy] || { lat: 10.3969, lng: 125.1999 };
+      setLat(String(initialCoords?.lat || bCoord.lat));
+      setLng(String(initialCoords?.lng || bCoord.lng));
+      setGpsAccuracy(5.0);
+      setBiosecurity(DEFAULT_BIOSECURITY);
+      setIsDeceased(false);
+      setMortalityDate(new Date().toISOString().slice(0, 10));
+      setMortalityReason('Suspected ASF Outbreak');
+    }
+  }, [editingPig, defaultBarangay, initialCoords, isAdmin, currentUser.barangay, existingPigs]);
+
+  // Lifecycle: When modal opens, initialize form state from editingPig or clean defaults
   useEffect(() => {
-    if (initialCoords) {
-      if (initialCoords.lat) setLat(String(initialCoords.lat));
-      if (initialCoords.lng) setLng(String(initialCoords.lng));
-      if (initialCoords.barangay && isAdmin) {
-        setBarangay(initialCoords.barangay);
-        const brgyCode = initialCoords.barangay.slice(0, 3).toUpperCase();
-        const count = (existingPigs || []).filter(p => p.barangay === initialCoords.barangay).length;
-        setEarTag(`HGN-${brgyCode}-${101 + count}`);
+    if (isOpen) {
+      resetToCleanState();
+    }
+  }, [isOpen, resetToCleanState]);
+
+  // Escape key closes modal
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
       }
-    }
-  }, [initialCoords, isAdmin, existingPigs]);
-
-  useEffect(() => {
-    if (editingPig?.biosecurity) {
-      setBiosecurity({
-        footbathMaintenance: editingPig.biosecurity.footbathMaintenance ?? true,
-        fencingIntegrity: editingPig.biosecurity.fencingIntegrity ?? true,
-        swillFeedingBanned: editingPig.biosecurity.swillFeedingBanned ?? true,
-        disinfectionRoutine: editingPig.biosecurity.disinfectionRoutine ?? true,
-        visitorLogControl: editingPig.biosecurity.visitorLogControl ?? false,
-        quarantineIsolationPen: editingPig.biosecurity.quarantineIsolationPen ?? false,
-        cleanWaterSource: editingPig.biosecurity.cleanWaterSource ?? true,
-      });
-    }
-  }, [editingPig]);
-
-  if (!isOpen) return null;
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleBarangayChange = (newBrgy: string) => {
     setBarangay(newBrgy);
@@ -174,7 +235,7 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
     });
   };
 
-  // Biosecurity Assessment Items Configuration
+  // Biosecurity Assessment Items Configuration with bilingual support
   const biosecurityItems: {
     key: keyof BiosecurityAssessment;
     label: string;
@@ -184,50 +245,50 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
   }[] = [
     {
       key: 'footbathMaintenance',
-      label: 'Footbath Maintenance',
-      description: 'Functional entrance footbath with active chemical disinfectant (e.g. Virkon S / bleach) replenished regularly.',
+      label: t('biosecurity.footbath.label'),
+      description: t('biosecurity.footbath.description'),
       tag: 'Sanitation Gate',
       icon: Sparkles
     },
     {
       key: 'fencingIntegrity',
-      label: 'Perimeter Fencing Integrity',
-      description: 'Sturdy, intact perimeter barrier preventing unauthorized entry by stray swine, domestic dogs, and wild boars.',
+      label: t('biosecurity.fencing.label'),
+      description: t('biosecurity.fencing.description'),
       tag: 'Containment',
       icon: Shield
     },
     {
       key: 'swillFeedingBanned',
-      label: 'Zero-Swill Feeding (DA ASF Ban)',
-      description: 'Strict prohibition of feeding untreated kitchen food scraps, restaurant slop (kanin-baboy), or unboiled food waste.',
+      label: t('biosecurity.swillBan.label'),
+      description: t('biosecurity.swillBan.description'),
       tag: 'DA Policy',
       icon: Ban
     },
     {
       key: 'disinfectionRoutine',
-      label: 'Scheduled Pen Disinfection',
-      description: 'Documented regular schedule of pen power washing, drying, and surface disinfectant spraying (at least weekly).',
+      label: t('biosecurity.disinfection.label'),
+      description: t('biosecurity.disinfection.description'),
       tag: 'Protocol',
       icon: Droplets
     },
     {
       key: 'visitorLogControl',
-      label: 'Visitor & Vehicle Access Control',
-      description: 'Restricted farm entry, mandatory visitor logbook, boot change / plastic shoe covers, and tire disinfection spray.',
+      label: t('biosecurity.visitorLog.label'),
+      description: t('biosecurity.visitorLog.description'),
       tag: 'Biosecurity Gate',
       icon: Users
     },
     {
       key: 'quarantineIsolationPen',
-      label: 'Quarantine / Isolation Facility',
-      description: 'Dedicated isolation pen with separate feed/water troughs for newly introduced stock (14-21 day hold) or sick swine.',
+      label: t('biosecurity.quarantinePen.label'),
+      description: t('biosecurity.quarantinePen.description'),
       tag: 'Isolation',
       icon: CheckCircle2
     },
     {
       key: 'cleanWaterSource',
-      label: 'Protected Clean Water Source',
-      description: 'Enclosed potable drinking water line or protected deep-well supply isolated from open canal runoff contamination.',
+      label: t('biosecurity.cleanWater.label'),
+      description: t('biosecurity.cleanWater.description'),
       tag: 'Potability',
       icon: Droplets
     }
@@ -237,13 +298,13 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
   const totalBiosecurityCount = biosecurityItems.length;
   const biosecurityPct = Math.round((biosecurityCount / totalBiosecurityCount) * 100);
 
-  let biosecurityLevel = 'Level 1: Basic (Moderate Risk)';
+  let biosecurityLevel = t('biosecurity.level1Basic');
   let biosecurityLevelColor = 'text-amber-700 bg-amber-50 border-amber-300';
   if (biosecurityCount >= 6) {
-    biosecurityLevel = 'Level 3: High Biosecurity (Certified Compliant)';
+    biosecurityLevel = t('biosecurity.level3High');
     biosecurityLevelColor = 'text-emerald-800 bg-emerald-50 border-emerald-300';
   } else if (biosecurityCount >= 4) {
-    biosecurityLevel = 'Level 2: Standard Biosecure (Acceptable)';
+    biosecurityLevel = t('biosecurity.level2Standard');
     biosecurityLevelColor = 'text-[#2F5C3F] bg-[#F5EFDD] border-[#DED2AE]';
   }
 
@@ -273,30 +334,45 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
       gpsAccuracy,
       registeredBy: currentUser.username,
       notes: notes.trim(),
-      biosecurity
+      biosecurity,
+      photoUrl,
+      isDeceased,
+      mortalityDate: isDeceased ? mortalityDate : undefined,
+      mortalityReason: isDeceased ? mortalityReason : undefined
     };
 
     onSave(record);
     onClose();
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#141A12]/60 backdrop-blur-xs overflow-y-auto animate-fadeIn">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#141A12]/60 backdrop-blur-xs overflow-y-auto animate-fadeIn"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div className="bg-white border border-[#DED2AE] rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl my-6">
         
         {/* MODAL HEADER */}
         <div className="bg-[#203F2B] text-white px-6 py-4 rounded-t-2xl flex items-center justify-between sticky top-0 z-20 shadow-xs">
           <div>
             <span className="font-mono text-xs text-[#D9A441] uppercase tracking-widest font-semibold block">
-              Department of Agriculture · Hinunangan
+              {t('modal.deptHeader')}
             </span>
             <h3 className="font-serif text-lg font-bold text-white">
-              {editingPig ? `Edit Registration — ${editingPig.earTag}` : 'New Swine Registration'}
+              {editingPig ? t('modal.titleEdit', { earTag: editingPig.earTag }) : t('modal.titleNew')}
             </h3>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-1.5 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors cursor-pointer"
+            title="Close"
           >
             <X className="w-5 h-5" />
           </button>
@@ -305,6 +381,42 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
         {/* MODAL BODY FORM */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6 text-[#1E2B1F]">
           
+          {/* Connection Status Banner */}
+          {!isOnline ? (
+            <div className="bg-amber-50 border border-amber-300 rounded-xl p-3.5 flex items-start gap-3 text-xs text-amber-950 shadow-2xs">
+              <div className="p-1.5 bg-amber-200/70 rounded-lg text-amber-900 shrink-0 mt-0.5">
+                <WifiOff className="w-4 h-4" />
+              </div>
+              <div className="flex-1">
+                <div className="font-bold flex items-center justify-between">
+                  <span className="text-amber-900 font-semibold">Offline Field Mode • Saved Locally</span>
+                  <span className="bg-amber-200/80 text-amber-900 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold">
+                    OFFLINE DRAFT
+                  </span>
+                </div>
+                <p className="text-amber-800/90 text-[11px] mt-0.5 leading-relaxed">
+                  Your record and edits will be stored safely in this device's local memory right now. As soon as an internet signal is detected, it will automatically upload and sync live with Central Cloud Firestore.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl px-3.5 py-2.5 flex items-center justify-between text-xs text-emerald-950">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 animate-pulse shrink-0" />
+                <span className="font-semibold text-emerald-900 text-[12px]">
+                  Connected to Central DA Cloud
+                </span>
+                <span className="text-emerald-700/80 text-[11px] hidden sm:inline">
+                  • Automatic Live Sync Active
+                </span>
+              </div>
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                <CloudCheck className="w-3 h-3" />
+                <span>LIVE</span>
+              </span>
+            </div>
+          )}
+
           {/* Section 1: Geographic GIS Location Picker */}
           <div>
             <div className="font-bold text-xs uppercase tracking-wider text-[#55604F] mb-2 flex items-center justify-between">
@@ -444,6 +556,58 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
                 />
               </div>
             </div>
+
+            {/* Swine / Pen Profile Photo Upload */}
+            <div className="mt-3 pt-3 border-t border-[#EAE1C4]">
+              <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                Swine / Pen Photo (Optional)
+              </label>
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 rounded-xl border border-[#DED2AE] bg-[#FBF8EF] flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                  {photoUrl ? (
+                    <img src={photoUrl} alt="Swine profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <Camera className="w-6 h-6 text-[#AEC0AE]" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <label className="px-3 py-1.5 bg-[#2F5C3F] hover:bg-[#203F2B] text-white text-xs font-semibold rounded-lg cursor-pointer transition-colors inline-flex items-center gap-1.5">
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>{photoUrl ? 'Change Photo' : 'Upload Photo'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              const base64 = await compressImageToBase64(file, 800);
+                              setPhotoUrl(base64);
+                            } catch (err) {
+                              console.error('Failed to compress image', err);
+                            }
+                          }
+                        }}
+                      />
+                    </label>
+                    {photoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setPhotoUrl('')}
+                        className="px-2.5 py-1.5 text-xs text-rose-600 hover:text-rose-700 font-semibold cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-[#55604F] mt-1">
+                    Upload ear notch, pen inspection, or ear tag photo (auto-compressed for offline sync).
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Section 3: Swine Specifications & General Health */}
@@ -566,6 +730,93 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
                   />
                   <span className="text-xs font-semibold text-[#1E2B1F]">ASF Biosecurity Clearance Passed</span>
                 </label>
+              </div>
+            </div>
+
+            {/* Swine Mortality & Biosecurity Outbreak Status Section */}
+            <div className="mt-4 pt-3.5 border-t border-[#EAE1C4]">
+              <div className={`p-3.5 rounded-xl border transition-all ${
+                isDeceased 
+                  ? 'bg-rose-50 border-rose-300 shadow-xs' 
+                  : 'bg-[#FBF8EF] border-[#DED2AE]'
+              }`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-1.5 rounded-lg shrink-0 ${
+                      isDeceased ? 'bg-rose-100 text-rose-800' : 'bg-[#F5EFDD] text-[#55604F]'
+                    }`}>
+                      <AlertCircle className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <label htmlFor="isDeceasedToggle" className={`text-xs font-bold block cursor-pointer ${
+                        isDeceased ? 'text-rose-950' : 'text-[#1E2B1F]'
+                      }`}>
+                        Mark Pig as Deceased (Mortality Event)
+                      </label>
+                      <p className={`text-[11px] ${isDeceased ? 'text-rose-800' : 'text-[#55604F]'}`}>
+                        Tracks livestock deaths for biosecurity outbreak tracing &amp; DA ASF surveillance.
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      id="isDeceasedToggle"
+                      type="checkbox"
+                      checked={isDeceased}
+                      onChange={(e) => setIsDeceased(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-neutral-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-600"></div>
+                  </label>
+                </div>
+
+                {/* Conditional Mortality Details Form */}
+                {isDeceased && (
+                  <div className="mt-3 pt-3 border-t border-rose-200/80 space-y-3 animate-fadeIn">
+                    <div className="text-[11px] font-bold text-rose-900 flex items-center gap-1.5 uppercase font-mono">
+                      <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Mortality &amp; Outbreak Surveillance Record</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-rose-900 mb-1">
+                          Mortality Date *
+                        </label>
+                        <input
+                          type="date"
+                          required={isDeceased}
+                          value={mortalityDate}
+                          onChange={(e) => setMortalityDate(e.target.value)}
+                          className="w-full bg-white border border-rose-300 rounded-lg px-3 py-2 text-xs text-rose-950 font-mono focus:border-rose-600 outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-rose-900 mb-1">
+                          Mortality Cause / Reason *
+                        </label>
+                        <select
+                          value={mortalityReason}
+                          onChange={(e) => setMortalityReason(e.target.value)}
+                          className="w-full bg-white border border-rose-300 rounded-lg px-3 py-2 text-xs text-rose-950 font-bold focus:border-rose-600 outline-none"
+                        >
+                          <option value="Suspected ASF Outbreak">Suspected ASF Outbreak (High Risk)</option>
+                          <option value="High Fever / Systemic Illness">High Fever / Systemic Illness</option>
+                          <option value="Respiratory Syndrome">Respiratory Syndrome / Pneumonia</option>
+                          <option value="Piglet Mortality / Scours">Piglet Mortality / Scours</option>
+                          <option value="Injury / Physical Trauma">Injury / Physical Trauma</option>
+                          <option value="Other Disease / Natural Causes">Other Disease / Natural Causes</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="bg-rose-100/70 border border-rose-300/80 p-2.5 rounded-lg text-[10px] text-rose-900 leading-tight">
+                      <b>Biosecurity Advisory:</b> Recorded mortality events are flagged in municipal GIS spatial maps and biosecurity reports to assist DA focal Officers in early cluster detection and quarantine enforcement.
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -704,15 +955,24 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
               onClick={onClose}
               className="px-5 py-2.5 rounded-xl border border-[#DED2AE] text-[#55604F] hover:text-[#1E2B1F] text-sm font-semibold transition-colors cursor-pointer"
             >
-              Cancel
+              {t('modal.cancelBtn')}
             </button>
 
             <button
               type="submit"
-              className="flex items-center gap-2 bg-[#2F5C3F] hover:bg-[#203F2B] text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-md transition-colors cursor-pointer"
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold shadow-md transition-colors cursor-pointer ${
+                !isOnline 
+                  ? 'bg-[#D9A441] hover:bg-[#c29134] text-[#1E2B1F]' 
+                  : 'bg-[#2F5C3F] hover:bg-[#203F2B] text-white'
+              }`}
             >
               <Save className="w-4 h-4" />
-              <span>{editingPig ? 'Save Updates' : 'Register Swine Record'}</span>
+              <span>
+                {!isOnline 
+                  ? (editingPig ? 'Save Local Changes (Offline Draft)' : 'Save Record (Offline Draft)') 
+                  : (editingPig ? t('modal.updateBtn') : t('modal.saveBtn'))
+                }
+              </span>
             </button>
           </div>
         </form>
