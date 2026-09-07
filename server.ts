@@ -1,18 +1,18 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import cors from 'cors';
-import path from 'path';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const app = express();
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const PORT = parseInt(process.env.PORT || '10000', 10);
 
 // Configure dynamic CORS origins (Vercel frontend, local development, custom domain)
 const allowedOrigins = [
   process.env.CLIENT_URL,
+  'https://swine-registry.vercel.app',
   'https://hinunangan-swine-gis.vercel.app',
   'http://localhost:3000',
   'http://localhost:5173',
@@ -67,15 +67,38 @@ function getDbPool(): Pool | null {
 }
 
 // ==============================================================================
-// 1. Render Keep-Alive Health Check Endpoint
+// 1. Root & Health Check Endpoints (Headless Service)
 // ==============================================================================
-app.get('/health', (req: Request, res: Response) => {
+
+// Root Endpoint Handler
+app.get('/', (req: Request, res: Response) => {
+  res.status(200).json({
+    status: 'online',
+    service: 'Hinunangan Swine GIS API',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Dedicated Render Keep-Alive Health Check Endpoint with DB Ping Verification
+app.get('/health', async (req: Request, res: Response) => {
+  const pool = getDbPool();
+  let dbStatus = 'unconfigured';
+  if (pool) {
+    try {
+      await pool.query('SELECT 1');
+      dbStatus = 'connected';
+    } catch (err) {
+      dbStatus = 'error';
+    }
+  }
+
   res.status(200).json({
     status: 'ok',
-    service: 'Hinunangan Swine Biosecurity GIS API',
+    service: 'Hinunangan Swine GIS API',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     dbConfigured: !!process.env.DATABASE_URL,
+    database: dbStatus,
     version: '1.0.0'
   });
 });
@@ -177,15 +200,6 @@ app.get('/api/spatial/barangay-summary', async (req: Request, res: Response) => 
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
-// Production Static Serving for full-stack monolith build
-if (process.env.NODE_ENV === 'production') {
-  const distPath = path.join(process.cwd(), 'dist');
-  app.use(express.static(distPath));
-  app.get('*', (req: Request, res: Response) => {
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
-}
 
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {
