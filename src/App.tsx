@@ -25,8 +25,10 @@ import { loadStoredAuth, loadStoredPigs, loadStoredUsers, saveStoredAuth, saveSt
 import { AppViewMode, PigRecord, User } from './types';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useOfflineSync } from './hooks/useOfflineSync';
-import { enqueueSyncAction, syncWithCloudFirestore } from './services/syncService';
-import { subscribeToCloudPigs } from './services/firebase';
+import { useRealtimeSync } from './hooks/useRealtimeSync';
+import { enqueueSyncAction, syncWithSupabase } from './services/syncService';
+import { subscribeToPigRecordUpdates, testDatabaseConnection } from './services/supabaseClient';
+import { checkBackendHealth } from './services/backendApi';
 import { fetchSystemSettings } from './services/settingsService';
 import { useI18n } from './i18n/I18nContext';
 import { motion, AnimatePresence } from 'motion/react';
@@ -43,6 +45,7 @@ import { PrintReportsView } from './components/PrintReportsView';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { OfflineSyncModal } from './components/OfflineSyncModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import ToastContainer from './components/ToastContainer';
 import { LanguageToggle } from './components/LanguageToggle';
 import { SystemSettings } from './types';
 
@@ -52,6 +55,7 @@ export default function App() {
   const [users, setUsers] = useState<User[]>(() => loadStoredUsers());
   const [pigs, setPigs] = useState<PigRecord[]>(() => loadStoredPigs());
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [systemSettings, setSystemSettings] = useState<SystemSettings>({});
 
   useEffect(() => {
@@ -75,6 +79,7 @@ export default function App() {
 
   const geo = useGeolocation();
   const offlineSync = useOfflineSync();
+  const { realtimeStatus } = useRealtimeSync({ setPigs, setUsers });
 
   // Subtle 'ping' animation state when detecting sync queue updates
   const [isSyncPinging, setIsSyncPinging] = useState<boolean>(false);
@@ -101,33 +106,56 @@ export default function App() {
     }
   }, [offlineSync.syncQueue]);
 
-  // Initial Cloud Firestore synchronization on startup
+  // Initial Supabase PostgreSQL database synchronization on startup
   useEffect(() => {
-    syncWithCloudFirestore()
-      .then((synced) => {
-        setPigs(synced.pigs);
-        setUsers(synced.users);
-        setIsCloudConnected(true);
-      })
-      .catch((err) => {
-        console.warn('Initial cloud sync notice:', err);
-      });
+    let isMounted = true;
+    let unsubscribe: () => void = () => {};
 
-    // Realtime listener for live GIS & Swine heatmap updates from other officers
-    const unsubscribe = subscribeToCloudPigs((updatedPigs) => {
-      if (updatedPigs && updatedPigs.length > 0) {
-        setPigs(prev => {
-          const pigMap = new Map<string, PigRecord>();
-          prev.forEach(p => pigMap.set(p.id, p));
-          updatedPigs.forEach(p => pigMap.set(p.id, p));
-          const merged = Array.from(pigMap.values());
-          saveStoredPigs(merged);
-          return merged;
+    async function initializeDatabaseConnection() {
+      try {
+        setIsLoading(true);
+        // Test direct database connectivity and API key validation
+        await testDatabaseConnection().catch((err) => {
+          console.warn('Database connection test notice:', err);
         });
+
+        const synced = await syncWithSupabase();
+        if (isMounted && synced) {
+          if (Array.isArray(synced.pigs)) setPigs(synced.pigs);
+          if (Array.isArray(synced.users)) setUsers(synced.users);
+          setIsCloudConnected(true);
+        }
+      } catch (err) {
+        console.warn('Initial cloud sync notice:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
-    });
+
+      // Realtime listener for live GIS & Swine heatmap updates from other officers via Supabase Realtime
+      try {
+        unsubscribe = subscribeToPigRecordUpdates((updatedPigs) => {
+          if (isMounted && updatedPigs && Array.isArray(updatedPigs) && updatedPigs.length > 0) {
+            setPigs(prev => {
+              const pigMap = new Map<string, PigRecord>();
+              (prev || []).forEach(p => pigMap.set(p.id, p));
+              updatedPigs.forEach(p => pigMap.set(p.id, p));
+              const merged = Array.from(pigMap.values());
+              saveStoredPigs(merged);
+              return merged;
+            });
+          }
+        });
+      } catch (subErr) {
+        console.warn('Realtime subscription notice:', subErr);
+      }
+    }
+
+    initializeDatabaseConnection();
 
     return () => {
+      isMounted = false;
       unsubscribe();
     };
   }, []);
@@ -269,7 +297,7 @@ export default function App() {
           transition={{ duration: 0.25 }}
         >
           <LandingView
-            pigs={pigs}
+            pigs={pigs || []}
             onOpenLogin={() => setIsLoginModalOpen(true)}
             onExploreProgram={() => setIsLoginModalOpen(true)}
             systemSettings={systemSettings}
@@ -301,7 +329,7 @@ export default function App() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.25 }}
-      className="h-screen overflow-hidden bg-[#F5EFDD] text-[#1E2B1F] flex flex-col md:flex-row"
+      className="h-screen overflow-hidden bg-[#F5EFDD] text-[#1E2B1F] flex flex-col md:flex-row relative"
     >
       
       {/* MOBILE DRAWER BACKDROP OVERLAY */}
@@ -532,7 +560,7 @@ export default function App() {
               <PWAInstallButton size="sm" />
             </div>
 
-            {/* Live Connection & Sync Button */}
+            {/* Live Connection & Realtime Sync Indicator Button */}
             <button
               type="button"
               onClick={() => setIsSyncModalOpen(true)}
@@ -543,20 +571,23 @@ export default function App() {
                   ? 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'
                   : 'bg-[#F5EFDD] border-[#DED2AE] text-[#203F2B] hover:bg-[#EAE1C4]'
               }`}
-              title="Click to open Offline Sync Hub"
+              title="Click to open Offline & Realtime Sync Hub"
             >
               <span className={`w-2 h-2 rounded-full shrink-0 ${
                 !offlineSync.isOnline ? 'bg-amber-500 animate-pulse' :
-                offlineSync.pendingCount > 0 ? 'bg-amber-500' : 'bg-[#2F5C3F]'
+                offlineSync.pendingCount > 0 ? 'bg-amber-500 animate-bounce' :
+                realtimeStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
               }`} />
               <span className="hidden md:inline font-semibold text-[11px]">
                 {!offlineSync.isOnline 
                   ? t('topbar.offlineMode') 
                   : offlineSync.pendingCount > 0 
                   ? t('topbar.queuedItems', { count: offlineSync.pendingCount }) 
+                  : realtimeStatus === 'connected'
+                  ? 'Realtime Sync Active'
                   : t('topbar.liveOnline')}
               </span>
-              <Radio className="w-3.5 h-3.5 text-[#2F5C3F] shrink-0" />
+              <Radio className={`w-3.5 h-3.5 shrink-0 ${realtimeStatus === 'connected' ? 'text-emerald-700 animate-pulse' : 'text-[#2F5C3F]'}`} />
             </button>
 
             {/* Scope Badge (Desktop / Large screen inline view) */}
@@ -696,7 +727,7 @@ export default function App() {
                 className="w-full"
               >
                 <DashboardView
-                  pigs={pigs}
+                  pigs={pigs || []}
                   currentUser={currentUser}
                   onNavigate={(v) => setCurrentView(v)}
                   onOpenAddModal={handleOpenNewRegistration}
@@ -717,7 +748,7 @@ export default function App() {
                 className="w-full h-full flex-1 flex flex-col"
               >
                 <GisMap
-                  pigs={pigs}
+                  pigs={pigs || []}
                   currentUser={currentUser}
                   onOpenAddModalWithCoords={handleOpenAddModalWithCoords}
                   onEditPig={handleEditPig}
@@ -738,7 +769,7 @@ export default function App() {
                 className="w-full"
               >
                 <RecordsView
-                  pigs={pigs}
+                  pigs={pigs || []}
                   currentUser={currentUser}
                   onOpenAddModal={handleOpenNewRegistration}
                   onEditPig={handleEditPig}
@@ -762,8 +793,8 @@ export default function App() {
                 className="w-full"
               >
                 <AccountsView
-                  users={users}
-                  pigs={pigs}
+                  users={users || []}
+                  pigs={pigs || []}
                   systemSettings={systemSettings}
                   onUpdateSettings={async (newSettings) => {
                     setSystemSettings(newSettings);
@@ -795,7 +826,7 @@ export default function App() {
                 className="w-full"
               >
                 <PrintReportsView
-                  pigs={pigs}
+                  pigs={pigs || []}
                   currentUser={currentUser}
                 />
               </motion.div>
@@ -827,6 +858,9 @@ export default function App() {
         onClose={() => setIsSyncModalOpen(false)}
         offlineSync={offlineSync}
       />
+
+      {/* TOAST NOTIFICATION SYSTEM */}
+      <ToastContainer />
 
     </motion.div>
   );

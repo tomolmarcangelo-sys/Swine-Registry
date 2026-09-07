@@ -2,14 +2,17 @@ import { SyncQueueItem, PigRecord, User, SyncActionType } from '../types';
 import { loadStoredPigs, saveStoredPigs, loadStoredUsers, saveStoredUsers } from './storage';
 import { saveSyncQueueToIdb, loadSyncQueueFromIdb } from './indexedDbService';
 import { 
-  savePigToCloud, 
-  deletePigFromCloud, 
-  saveUserToCloud, 
-  fetchPigsFromCloud, 
-  fetchUsersFromCloud,
-  batchSavePigsToCloud,
-  batchSaveUsersToCloud
-} from './firebase';
+  savePigToSupabase, 
+  deletePigFromSupabase, 
+  saveUserToSupabase, 
+  fetchPigsFromSupabase, 
+  fetchUsersFromSupabase,
+  batchSavePigsToSupabase,
+  batchSaveUsersToSupabase,
+  getSupabaseClient,
+  rowToPig
+} from './supabaseClient';
+import { supabase } from './supabase';
 
 const STORAGE_SYNC_QUEUE = 'hinunangan_da_sync_queue_v4';
 const STORAGE_LAST_SYNC = 'hinunangan_da_last_sync_timestamp';
@@ -218,24 +221,24 @@ export interface SyncProcessResult {
 }
 
 /**
- * Initializes and pulls data from Cloud Firestore if empty or on initial cloud sync
+ * Initializes and pulls data from Supabase PostgreSQL if empty or on initial cloud sync
  */
-export async function syncWithCloudFirestore(): Promise<{ pigs: PigRecord[]; users: User[] }> {
+export async function syncWithSupabase(): Promise<{ pigs: PigRecord[]; users: User[] }> {
   try {
-    let cloudPigs = await fetchPigsFromCloud();
-    let cloudUsers = await fetchUsersFromCloud();
+    let cloudPigs = await fetchPigsFromSupabase();
+    let cloudUsers = await fetchUsersFromSupabase();
 
     let localPigs = loadStoredPigs();
     let localUsers = loadStoredUsers();
 
     // If Cloud is empty on first boot, seed Cloud from initial local database
     if (cloudPigs.length === 0 && localPigs.length > 0) {
-      await batchSavePigsToCloud(localPigs);
+      await batchSavePigsToSupabase(localPigs);
       cloudPigs = localPigs;
     }
 
     if (cloudUsers.length === 0 && localUsers.length > 0) {
-      await batchSaveUsersToCloud(localUsers);
+      await batchSaveUsersToSupabase(localUsers);
       cloudUsers = localUsers;
     }
 
@@ -261,13 +264,16 @@ export async function syncWithCloudFirestore(): Promise<{ pigs: PigRecord[]; use
 
     return { pigs: localPigs, users: localUsers };
   } catch (err) {
-    console.warn('Cloud sync fallback to local storage:', err);
+    console.warn('Supabase sync fallback to local storage:', err);
     return { pigs: loadStoredPigs(), users: loadStoredUsers() };
   }
 }
 
+// Backwards compatibility alias
+export const syncWithCloudFirestore = syncWithSupabase;
+
 /**
- * Executes sync of pending operations directly to Firebase Cloud Firestore.
+ * Executes sync of pending operations directly to Supabase PostgreSQL Database.
  * Applies mutations cleanly to both local cache and Cloud database.
  */
 export async function processSyncQueue(targetId?: string): Promise<SyncProcessResult> {
@@ -314,25 +320,84 @@ export async function processSyncQueue(targetId?: string): Promise<SyncProcessRe
               currentPigs = [pigData, ...currentPigs];
             }
             if (canSendToCloud) {
-              await savePigToCloud(pigData);
+              await savePigToSupabase(pigData);
             }
           } else if (item.action === 'update') {
-            const idx = currentPigs.findIndex(p => p.id === item.recordId);
-            if (idx >= 0) {
-              currentPigs[idx] = { ...currentPigs[idx], ...pigData };
-              if (canSendToCloud) {
-                await savePigToCloud(currentPigs[idx]);
+            let isConflictResolvedByServer = false;
+            
+            if (canSendToCloud) {
+              try {
+                const client = getSupabaseClient() || supabase;
+                const { data: dbRow } = await client.from('pig_records').select('*').eq('id', item.recordId).maybeSingle();
+                if (dbRow) {
+                  const serverPig = rowToPig(dbRow);
+                  // Check if there are critical field discrepancies (conflict)
+                  const isConflicting = 
+                    (serverPig.ownerName !== pigData.ownerName && pigData.ownerName !== '') ||
+                    (serverPig.barangay !== pigData.barangay && pigData.barangay !== '') ||
+                    (serverPig.vaccinated !== pigData.vaccinated) ||
+                    (serverPig.asfCleared !== pigData.asfCleared);
+
+                  if (isConflicting) {
+                    const policy = getConflictPolicy();
+                    console.warn(`[Sync Conflict Detected] ID: ${item.recordId}. Policy: ${policy}`);
+
+                    // Dispatch custom conflict event
+                    window.dispatchEvent(new CustomEvent('hinunangan_sync_conflict', {
+                      detail: {
+                        recordId: item.recordId,
+                        earTag: pigData.earTag || serverPig.earTag,
+                        ownerName: pigData.ownerName || 'Unknown',
+                        serverOwnerName: serverPig.ownerName || 'Unknown',
+                        policy
+                      }
+                    }));
+
+                    if (policy === 'server-wins') {
+                      const idx = currentPigs.findIndex(p => p.id === item.recordId);
+                      if (idx >= 0) {
+                        currentPigs[idx] = serverPig;
+                      }
+                      isConflictResolvedByServer = true;
+                      
+                      successCount++;
+                      results.push({ 
+                        id: item.id, 
+                        success: true, 
+                        message: 'Resolved via Server-Wins' 
+                      });
+                      updatedQueue[i] = {
+                        ...item,
+                        status: 'synced' as const,
+                        lastAttempt: new Date().toISOString(),
+                        errorMessage: 'Resolved: Server-Wins'
+                      };
+                    }
+                  }
+                }
+              } catch (err) {
+                console.warn('Conflict checking notice:', err);
               }
-            } else {
-              currentPigs = [pigData as PigRecord, ...currentPigs];
-              if (canSendToCloud) {
-                await savePigToCloud(pigData as PigRecord);
+            }
+
+            if (!isConflictResolvedByServer) {
+              const idx = currentPigs.findIndex(p => p.id === item.recordId);
+              if (idx >= 0) {
+                currentPigs[idx] = { ...currentPigs[idx], ...pigData };
+                if (canSendToCloud) {
+                  await savePigToSupabase(currentPigs[idx]);
+                }
+              } else {
+                currentPigs = [pigData as PigRecord, ...currentPigs];
+                if (canSendToCloud) {
+                  await savePigToSupabase(pigData as PigRecord);
+                }
               }
             }
           } else if (item.action === 'delete') {
             currentPigs = currentPigs.filter(p => p.id !== item.recordId);
             if (canSendToCloud) {
-              await deletePigFromCloud(item.recordId);
+              await deletePigFromSupabase(item.recordId);
             }
           }
         } else if (item.entityType === 'user') {
@@ -345,7 +410,7 @@ export async function processSyncQueue(targetId?: string): Promise<SyncProcessRe
               currentUsers = [...currentUsers, userData];
             }
             if (canSendToCloud) {
-              await saveUserToCloud(userData);
+              await saveUserToSupabase(userData);
             }
           } else if (item.action === 'delete') {
             currentUsers = currentUsers.filter(u => u.username.toLowerCase() !== item.recordId.toLowerCase());
@@ -357,7 +422,7 @@ export async function processSyncQueue(targetId?: string): Promise<SyncProcessRe
           id: item.id, 
           success: true, 
           message: canSendToCloud 
-            ? 'Synchronized successfully to Firebase Firestore Cloud' 
+            ? 'Synchronized successfully to Supabase PostgreSQL Database' 
             : 'Applied to local storage (queued for Cloud connection)' 
         });
 

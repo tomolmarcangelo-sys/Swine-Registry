@@ -24,11 +24,13 @@ import {
   WifiOff,
   Radio,
   Clock,
-  Send
+  Send,
+  Activity
 } from 'lucide-react';
 import { BARANGAYS_DATA } from '../data/constants';
 import { PigRecord, User, SyncQueueItem, SystemSettings } from '../types';
 import { compressImageToBase64 } from '../services/imageUpload';
+import { DiagnosticPage } from './DiagnosticPage';
 import { 
   downloadJsonBackup, 
   parseAndValidateBackupJson, 
@@ -72,7 +74,7 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
   systemSettings = {},
   onUpdateSettings
 }) => {
-  const [activeTab, setActiveTab] = useState<'accounts' | 'backup' | 'sync' | 'settings'>('accounts');
+  const [activeTab, setActiveTab] = useState<'accounts' | 'backup' | 'sync' | 'settings' | 'diagnostics'>('accounts');
   const [settingsForm, setSettingsForm] = useState<SystemSettings>(systemSettings);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState('');
@@ -336,6 +338,26 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
             )}
             <Shield className="w-4 h-4 relative z-10" />
             <span className="relative z-10">Landing Page & CMS</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('diagnostics')}
+            className={`relative px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer ${
+              activeTab === 'diagnostics'
+                ? 'text-white'
+                : 'text-[#55604F] hover:text-[#1E2B1F]'
+            }`}
+          >
+            {activeTab === 'diagnostics' && (
+              <motion.div
+                layoutId="activeAccountsTabPill"
+                className="absolute inset-0 bg-[#2F5C3F] rounded-lg shadow-xs"
+                transition={{ type: "spring", stiffness: 400, damping: 32 }}
+              />
+            )}
+            <Activity className="w-4 h-4 text-[#D9A441] relative z-10" />
+            <span className="relative z-10">Diagnostics &amp; Pings</span>
           </button>
         </div>
       </div>
@@ -1156,6 +1178,19 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
               </button>
             </div>
           </div>
+        </motion.div>
+      )}
+
+      {/* TAB 5: DIAGNOSTICS & PINGS */}
+      {activeTab === 'diagnostics' && (
+        <motion.div
+          key="tab-diagnostics"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+        >
+          <DiagnosticPage />
         </motion.div>
       )}
       </AnimatePresence>

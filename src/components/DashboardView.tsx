@@ -82,7 +82,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </span>
               <span className="inline-flex items-center gap-1 bg-emerald-700/80 text-emerald-100 text-[11px] font-mono font-bold px-2 py-0.5 rounded-full border border-emerald-500/40">
                 <Database className="w-3 h-3 text-emerald-300" />
-                <span>Cloud Firestore Active</span>
+                <span>Supabase PostgreSQL Active</span>
               </span>
               <span className="text-xs text-[#C9D6C9] font-mono hidden sm:inline">
                 LGU Hinunangan DA

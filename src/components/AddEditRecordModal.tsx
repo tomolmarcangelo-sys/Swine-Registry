@@ -395,7 +395,7 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
                   </span>
                 </div>
                 <p className="text-amber-800/90 text-[11px] mt-0.5 leading-relaxed">
-                  Your record and edits will be stored safely in this device's local memory right now. As soon as an internet signal is detected, it will automatically upload and sync live with Central Cloud Firestore.
+                  Your record and edits will be stored safely in this device's local memory right now. As soon as an internet signal is detected, it will automatically upload and sync live with Supabase PostgreSQL Database.
                 </p>
               </div>
             </div>

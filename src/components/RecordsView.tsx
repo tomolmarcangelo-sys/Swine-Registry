@@ -650,7 +650,7 @@ export const RecordsView: React.FC<RecordsViewProps> = ({
                             <div className="mt-1">
                               <span 
                                 className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-medium"
-                                title="Live synchronized with Central Cloud Firestore"
+                                title="Live synchronized with Supabase PostgreSQL Database"
                               >
                                 <CloudCheck className="w-2.5 h-2.5 text-emerald-600" />
                                 <span>Live Synced</span>

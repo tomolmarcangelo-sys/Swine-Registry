@@ -1561,7 +1561,7 @@ export const GisMap: React.FC<GisMapProps> = ({
   // Focus specific pig if requested
   useEffect(() => {
     if (!focusPigId || !mapInstanceRef.current) return;
-    const target = pigs.find(p => p.id === focusPigId);
+    const target = (pigs || []).find(p => p.id === focusPigId);
     if (target) {
       setSelectedPig(target);
       mapInstanceRef.current.flyTo([target.lat, target.lng], 16, { duration: 1.2 });
@@ -2917,15 +2917,15 @@ export const GisMap: React.FC<GisMapProps> = ({
                   <div className="text-xs font-mono font-bold space-y-0.5">
                     <div className="text-emerald-700 flex justify-between">
                       <span>🟢 Low Risk:</span>
-                      <span>{BARANGAYS_DATA.filter(b => getBarangayRiskData(b, pigs).riskLevel === 'low').length} Brgys</span>
+                      <span>{BARANGAYS_DATA.filter(b => getBarangayRiskData(b, pigs || []).riskLevel === 'low').length} Brgys</span>
                     </div>
                     <div className="text-amber-700 flex justify-between">
                       <span>🟡 Medium Risk:</span>
-                      <span>{BARANGAYS_DATA.filter(b => getBarangayRiskData(b, pigs).riskLevel === 'medium').length} Brgys</span>
+                      <span>{BARANGAYS_DATA.filter(b => getBarangayRiskData(b, pigs || []).riskLevel === 'medium').length} Brgys</span>
                     </div>
                     <div className="text-rose-700 flex justify-between">
                       <span>🔴 High Risk Alert:</span>
-                      <span>{BARANGAYS_DATA.filter(b => getBarangayRiskData(b, pigs).riskLevel === 'high').length} Brgys</span>
+                      <span>{BARANGAYS_DATA.filter(b => getBarangayRiskData(b, pigs || []).riskLevel === 'high').length} Brgys</span>
                     </div>
                   </div>
                 </div>
