@@ -92,6 +92,53 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
   const [mortalityDate, setMortalityDate] = useState(editingPig?.mortalityDate || new Date().toISOString().slice(0, 10));
   const [mortalityReason, setMortalityReason] = useState(editingPig?.mortalityReason || 'Suspected ASF Outbreak');
 
+  // Validation & masking states
+  const [contactError, setContactError] = useState('');
+  const [earTagError, setEarTagError] = useState('');
+
+  // Helper function to format contact numbers to 09XX-XXX-XXXX format
+  const formatContactNumber = (val: string): string => {
+    const digits = val.replace(/\D/g, '');
+    let formatted = digits.slice(0, 11);
+    if (formatted.length > 4 && formatted.length <= 7) {
+      formatted = `${formatted.slice(0, 4)}-${formatted.slice(4)}`;
+    } else if (formatted.length > 7) {
+      formatted = `${formatted.slice(0, 4)}-${formatted.slice(4, 7)}-${formatted.slice(7)}`;
+    }
+    return formatted;
+  };
+
+  const handleContactChange = (val: string) => {
+    const formatted = formatContactNumber(val);
+    setContact(formatted);
+
+    const cleanDigits = formatted.replace(/\D/g, '');
+    if (formatted && cleanDigits.length !== 11) {
+      setContactError('Phone number must be exactly 11 digits (e.g. 0917-123-4567)');
+    } else if (formatted && !formatted.startsWith('09')) {
+      setContactError('Phone number must start with 09 (Philippine mobile standard)');
+    } else {
+      setContactError('');
+    }
+  };
+
+  const handleEarTagChange = (val: string) => {
+    // Force uppercase and allow alphanumeric and dashes
+    let formatted = val.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    setEarTag(formatted);
+
+    const earTagRegex = /^HGN-[A-Z]{3,4}-\d{3,6}$/;
+    if (!formatted) {
+      setEarTagError('Ear Tag / Municipal Registry ID is required');
+    } else if (!formatted.startsWith('HGN-')) {
+      setEarTagError('Ear Tag must start with "HGN-" prefix');
+    } else if (!earTagRegex.test(formatted)) {
+      setEarTagError('Must match Hinunangan registry format (e.g. HGN-POB-101)');
+    } else {
+      setEarTagError('');
+    }
+  };
+
   // Biosecurity & Sanitation Assessment State
   const [biosecurity, setBiosecurity] = useState<BiosecurityAssessment>(() => {
     if (editingPig?.biosecurity) {
@@ -125,9 +172,11 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
 
   // Reset form to pristine state (or editing record state)
   const resetToCleanState = useCallback(() => {
+    setContactError('');
+    setEarTagError('');
     if (editingPig) {
       setOwnerName(editingPig.ownerName || '');
-      setContact(editingPig.contact || '');
+      setContact(formatContactNumber(editingPig.contact || ''));
       setAddress(editingPig.address || '');
       setPhotoUrl(editingPig.photoUrl || '');
       setBarangay(editingPig.barangay || defaultBarangay);
@@ -310,6 +359,44 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Final pre-submit integrity validations
+    let hasValidationError = false;
+
+    // Contact number validation (if present, must be 11 digits starting with 09)
+    if (contact) {
+      const cleanDigits = contact.replace(/\D/g, '');
+      if (cleanDigits.length !== 11) {
+        setContactError('Phone number must be exactly 11 digits (e.g. 0917-123-4567)');
+        hasValidationError = true;
+      } else if (!contact.startsWith('09')) {
+        setContactError('Phone number must start with 09 (Philippine mobile standard)');
+        hasValidationError = true;
+      }
+    }
+
+    // Ear tag validation (required, must start with HGN- and match format)
+    const trimmedEarTag = earTag.trim();
+    const earTagRegex = /^HGN-[A-Z]{3,4}-\d{3,6}$/;
+    if (!trimmedEarTag) {
+      setEarTagError('Ear Tag / Municipal Registry ID is required');
+      hasValidationError = true;
+    } else if (!trimmedEarTag.startsWith('HGN-')) {
+      setEarTagError('Ear Tag must start with "HGN-" prefix');
+      hasValidationError = true;
+    } else if (!earTagRegex.test(trimmedEarTag)) {
+      setEarTagError('Must match Hinunangan registry format (e.g. HGN-POB-101)');
+      hasValidationError = true;
+    }
+
+    if (hasValidationError) {
+      // Find the first field with an error and scroll into view or just block submit
+      const errorSection = document.getElementById('toast-root');
+      if (errorSection) {
+        errorSection.scrollIntoView({ behavior: 'smooth' });
+      }
+      return;
+    }
 
     const numLat = Number(lat) || 10.3969;
     const numLng = Number(lng) || 125.1999;
@@ -499,9 +586,19 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
                   type="text"
                   placeholder="09XX-XXX-XXXX"
                   value={contact}
-                  onChange={(e) => setContact(e.target.value)}
-                  className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2.5 text-sm text-[#1E2B1F] focus:border-[#2F5C3F] focus:bg-white outline-none font-mono"
+                  onChange={(e) => handleContactChange(e.target.value)}
+                  className={`w-full bg-[#FBF8EF] border rounded-xl px-3.5 py-2.5 text-sm text-[#1E2B1F] focus:bg-white outline-none font-mono transition-colors ${
+                    contactError 
+                      ? 'border-rose-300 focus:border-rose-500 text-rose-950' 
+                      : 'border-[#DED2AE] focus:border-[#2F5C3F]'
+                  }`}
                 />
+                {contactError && (
+                  <p className="text-[11px] text-rose-600 font-medium mt-1 flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-rose-500" />
+                    {contactError}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -551,9 +648,24 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
                   type="text"
                   required
                   value={earTag}
-                  onChange={(e) => setEarTag(e.target.value)}
-                  className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2.5 text-sm text-[#1E2B1F] focus:border-[#2F5C3F] focus:bg-white outline-none font-mono font-bold"
+                  onChange={(e) => handleEarTagChange(e.target.value)}
+                  className={`w-full bg-[#FBF8EF] border rounded-xl px-3.5 py-2.5 text-sm font-mono font-bold focus:bg-white outline-none transition-colors ${
+                    earTagError 
+                      ? 'border-rose-300 focus:border-rose-500 text-rose-950' 
+                      : 'border-[#DED2AE] focus:border-[#2F5C3F] text-[#1E2B1F]'
+                  }`}
+                  placeholder="e.g. HGN-POB-101"
                 />
+                {earTagError ? (
+                  <p className="text-[11px] text-rose-600 font-medium mt-1 flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-rose-500" />
+                    {earTagError}
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-[#55604F] mt-1">
+                    Format: HGN-[BRGY]-[ID] (e.g., HGN-POB-101)
+                  </p>
+                )}
               </div>
             </div>
 
