@@ -409,16 +409,29 @@ export async function testDatabaseConnection(): Promise<boolean> {
   }
 
   try {
-    const { count, error } = await client
+    const response = await client
       .from('pig_records')
       .select('id', { count: 'exact', head: true });
 
-    if (error) {
-      console.error('[Supabase Test Connection Failed]:', error.message);
+    console.log('[Supabase Verbose Response]:', response);
+
+    if (response.error) {
+      if (response.error.code === 'PGRST205') {
+        console.error('[Supabase Test Connection Failed]: Missing table (PGRST205). Ensure schema is correctly created in Supabase.');
+      } else if (
+        response.error.code === 'PGRST301' || 
+        response.error.code === '401' || 
+        response.error.message?.includes('JWT') || 
+        response.error.message?.includes('auth')
+      ) {
+        console.error('[Supabase Test Connection Failed]: Authentication failure. Verify your VITE_SUPABASE_ANON_KEY.');
+      } else {
+        console.error('[Supabase Test Connection Failed]:', response.error.message, response.error);
+      }
       return false;
     }
 
-    console.log(`%c[Supabase Backend Connected]%c Successfully verified pig_records table (${count ?? 0} records)`, 'color: #10b981; font-weight: bold;', 'color: inherit;');
+    console.log(`%c[Supabase Backend Connected]%c Successfully verified pig_records table (${response.count ?? 0} records)`, 'color: #10b981; font-weight: bold;', 'color: inherit;');
     return true;
   } catch (err: any) {
     console.error('[Supabase Test Connection Exception]:', err?.message || err);
