@@ -66,14 +66,6 @@ export function useRealtimeSync({ setPigs, setUsers }: UseRealtimeSyncProps) {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'farms' },
-        (payload) => {
-          console.log('[Realtime DB Event - farms]:', payload);
-          triggerResync();
-        }
-      )
-      .on(
-        'postgres_changes',
         { event: '*', schema: 'public', table: 'users' },
         (payload) => {
           console.log('[Realtime DB Event - users]:', payload);
