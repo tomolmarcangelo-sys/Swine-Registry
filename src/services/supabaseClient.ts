@@ -218,7 +218,10 @@ export async function fetchPigsFromSupabase(): Promise<PigRecord[]> {
   if (!client) return [];
 
   try {
-    const { data, error } = await client.from('pig_records').select('*');
+    const { data, error } = await client
+      .from('pig_records')
+      .select('*')
+      .order('created_at', { ascending: false });
     if (error) {
       console.warn('[Supabase] fetchPigs error:', error.message);
       return [];

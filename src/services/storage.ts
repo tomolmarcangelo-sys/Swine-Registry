@@ -1,4 +1,4 @@
-import { DEFAULT_USERS, INITIAL_SEED_PIGS } from '../data/constants';
+import { DEFAULT_USERS } from '../data/constants';
 import { PigRecord, User } from '../types';
 import { savePigsToIdb, loadPigsFromIdb } from './indexedDbService';
 
@@ -31,12 +31,11 @@ export function loadStoredPigs(): PigRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_PIGS);
     if (!raw) {
-      localStorage.setItem(STORAGE_PIGS, JSON.stringify(INITIAL_SEED_PIGS));
-      return INITIAL_SEED_PIGS;
+      return [];
     }
     return JSON.parse(raw);
   } catch {
-    return INITIAL_SEED_PIGS;
+    return [];
   }
 }
 
@@ -203,8 +202,8 @@ export function restoreBackupData(
 }
 
 export function resetToInitialSeed(): { pigs: PigRecord[]; users: User[] } {
-  saveStoredPigs(INITIAL_SEED_PIGS);
+  saveStoredPigs([]);
   saveStoredUsers(DEFAULT_USERS);
-  return { pigs: INITIAL_SEED_PIGS, users: DEFAULT_USERS };
+  return { pigs: [], users: DEFAULT_USERS };
 }
 

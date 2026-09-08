@@ -29,6 +29,9 @@ export function useRealtimeSync({ setPigs, setUsers }: UseRealtimeSyncProps) {
 
   // Subscribe to Supabase Realtime postgres_changes on pig_records, farms, and users tables
   useEffect(() => {
+    // Perform mandatory clean fetch on mount to override any pre-rendered static state on Vercel
+    triggerResync();
+
     if (!isSupabaseConfigured() || !supabase) {
       setRealtimeStatus('disconnected');
       return;
