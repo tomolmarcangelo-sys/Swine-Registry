@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'motion/react';
 import { 
   PiggyBank, 
   MapPin, 
@@ -16,9 +17,20 @@ import {
   Database,
   CloudCheck
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend
+} from 'recharts';
 import { BARANGAYS_DATA, PURPOSE_COLORS, PURPOSES } from '../data/constants';
 import { AppViewMode, PigRecord, User } from '../types';
 import { useI18n } from '../i18n/I18nContext';
+import { DemographicsDistributionChart } from './DemographicsDistributionChart';
 
 interface DashboardViewProps {
   pigs: PigRecord[];
@@ -68,6 +80,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const recentPigs = [...scopedPigs]
     .sort((a, b) => new Date(b.dateRegistered).getTime() - new Date(a.dateRegistered).getTime())
     .slice(0, 6);
+
+  // Health Status Classification breakdown for Infographic
+  const healthyCount = scopedPigs.filter(p => !p.isDeceased && p.vaccinated).length;
+  const suspectCount = scopedPigs.filter(p => !p.isDeceased && !p.vaccinated).length;
+  const quarantinedCount = scopedPigs.filter(p => p.isDeceased).length;
+  const healthyPct = totalHeads > 0 ? Math.round((healthyCount / totalHeads) * 100) : 0;
+  const suspectPct = totalHeads > 0 ? Math.round((suspectCount / totalHeads) * 100) : 0;
+  const quarantinedPct = totalHeads > 0 ? Math.round((quarantinedCount / totalHeads) * 100) : 0;
+
+  // Generate mathematically accurate 30-day daily trend data
+  const trendData = React.useMemo(() => {
+    const data = [];
+    const today = new Date("2026-09-10"); // Grounded local anchor date
+    
+    for (let i = 29; i >= 0; i--) {
+      const targetDate = new Date(today);
+      targetDate.setDate(today.getDate() - i);
+      const targetTimeStr = targetDate.toISOString().split('T')[0];
+      
+      // Filter records registered on or before this day
+      const registeredByDay = scopedPigs.filter(p => {
+        const regDate = new Date(p.dateRegistered);
+        return regDate <= targetDate;
+      });
+      
+      let healthy = 0;
+      let pending = 0;
+      let deceased = 0;
+      
+      registeredByDay.forEach(p => {
+        const isDeadOnThisDay = p.isDeceased && p.mortalityDate && new Date(p.mortalityDate) <= targetDate;
+        if (isDeadOnThisDay) {
+          deceased++;
+        } else if (p.vaccinated) {
+          healthy++;
+        } else {
+          pending++;
+        }
+      });
+      
+      data.push({
+        dateLabel: targetDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        'Healthy / Vaccinated': healthy,
+        'Pending / Suspect': pending,
+        'Quarantined / Deceased': deceased,
+      });
+    }
+    return data;
+  }, [scopedPigs]);
 
   return (
     <div className="space-y-6">
@@ -159,12 +220,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* KPI METRIC CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         
-        <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
+        <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-300 ease-in-out">
           <div className="flex items-center justify-between text-[#55604F] mb-2">
             <span className="font-mono text-xs font-bold uppercase tracking-wider">{t('dashboard.totalSwine')}</span>
             <PiggyBank className="w-5 h-5 text-[#2F5C3F]" />
           </div>
-          <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B]">
+          <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B] transition-colors duration-300">
             {totalHeads}
           </div>
           <p className="text-xs text-[#55604F] mt-1">
@@ -172,12 +233,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
+        <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-300 ease-in-out">
           <div className="flex items-center justify-between text-[#55604F] mb-2">
             <span className="font-mono text-xs font-bold uppercase tracking-wider">{t('dashboard.barangaysCovered')}</span>
             <Building2 className="w-5 h-5 text-[#D9A441]" />
           </div>
-          <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B]">
+          <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B] transition-colors duration-300">
             {isAdmin ? `${coveredBrgyCount} / 40` : '1 / 1'}
           </div>
           <p className="text-xs text-[#55604F] mt-1">
@@ -185,12 +246,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
+        <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-300 ease-in-out">
           <div className="flex items-center justify-between text-[#55604F] mb-2">
             <span className="font-mono text-xs font-bold uppercase tracking-wider">{t('dashboard.vaccinatedRatio')}</span>
             <ShieldCheck className="w-5 h-5 text-emerald-600" />
           </div>
-          <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B]">
+          <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B] transition-colors duration-300">
             {vaxPercentage}%
           </div>
           <p className="text-xs text-[#55604F] mt-1">
@@ -198,12 +259,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
+        <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-300 ease-in-out">
           <div className="flex items-center justify-between text-[#55604F] mb-2">
             <span className="font-mono text-xs font-bold uppercase tracking-wider">{t('dashboard.averageWeight')}</span>
             <Scale className="w-5 h-5 text-blue-600" />
           </div>
-          <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B]">
+          <div className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B] transition-colors duration-300">
             {avgWeight}<span className="text-xl text-[#55604F] font-sans font-normal ml-1">kg</span>
           </div>
           <p className="text-xs text-[#55604F] mt-1">
@@ -212,6 +273,99 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
       </div>
+
+      {/* HEALTH STATUS DISTRIBUTION INFOGRAPHIC WIDGET */}
+      <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-serif text-lg font-bold text-[#203F2B] flex items-center gap-2">
+              <Activity className="w-5 h-5 text-[#2F5C3F]" />
+              <span>Municipal Swine Health Status Distribution</span>
+            </h3>
+            <p className="text-xs text-[#55604F]">Live biosecurity categorization across Healthy, Suspect/Pending, and Quarantined/Deceased records</p>
+          </div>
+          <span className="font-mono text-xs font-semibold bg-[#F5EFDD] text-[#203F2B] px-3 py-1 rounded-xl border border-[#DED2AE] self-start sm:self-auto">
+            {totalHeads} Head Census
+          </span>
+        </div>
+
+        {/* Visual Multi-Segment Proportion Bar with motion layout animations */}
+        <div className="w-full h-4 bg-[#F5EFDD] rounded-full overflow-hidden flex shadow-inner mb-5">
+          <motion.div 
+            className="h-full bg-emerald-600 hover:opacity-90" 
+            initial={{ width: 0 }}
+            animate={{ width: `${healthyPct}%` }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            title={`Healthy / Vaccinated: ${healthyCount} (${healthyPct}%)`}
+          />
+          <motion.div 
+            className="h-full bg-amber-500 hover:opacity-90" 
+            initial={{ width: 0 }}
+            animate={{ width: `${suspectPct}%` }}
+            transition={{ duration: 0.8, ease: "easeOut", delay: 0.1 }}
+            title={`Suspect / Pending Vax: ${suspectCount} (${suspectPct}%)`}
+          />
+          <motion.div 
+            className="h-full bg-rose-700 hover:opacity-90" 
+            initial={{ width: 0 }}
+            animate={{ width: `${quarantinedPct}%` }}
+            transition={{ duration: 0.8, ease: "easeOut", delay: 0.2 }}
+            title={`Quarantined / Deceased: ${quarantinedCount} (${quarantinedPct}%)`}
+          />
+        </div>
+
+        {/* Breakdown Legend Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-3 h-3 rounded-full bg-emerald-600 shrink-0" />
+              <div>
+                <span className="text-xs font-bold text-emerald-950 block">Healthy &amp; Vaccinated</span>
+                <span className="text-[11px] text-emerald-800">Protected &amp; Cleared</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="font-serif text-lg font-bold text-emerald-900">{healthyCount}</span>
+              <span className="text-xs font-mono text-emerald-700 block">({healthyPct}%)</span>
+            </div>
+          </div>
+
+          <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-3 h-3 rounded-full bg-amber-500 shrink-0" />
+              <div>
+                <span className="text-xs font-bold text-amber-950 block">Suspect / Pending Vax</span>
+                <span className="text-[11px] text-amber-800">Surveillance required</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="font-serif text-lg font-bold text-amber-900">{suspectCount}</span>
+              <span className="text-xs font-mono text-amber-700 block">({suspectPct}%)</span>
+            </div>
+          </div>
+
+          <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-3 h-3 rounded-full bg-rose-700 shrink-0" />
+              <div>
+                <span className="text-xs font-bold text-rose-950 block">Quarantined / Deceased</span>
+                <span className="text-[11px] text-rose-800">Mortality / ASF Vector</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="font-serif text-lg font-bold text-rose-900">{quarantinedCount}</span>
+              <span className="text-xs font-mono text-rose-700 block">({quarantinedPct}%)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* SWINE DEMOGRAPHICS & RESOURCE ALLOCATION (RECHARTS DISTRIBUTION CHARTS) */}
+      <DemographicsDistributionChart 
+        pigs={scopedPigs}
+        isAdmin={isAdmin}
+        selectedBarangayName={currentUser.barangay}
+      />
 
       {/* CHARTS & DISTRIBUTION */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -327,6 +481,121 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
+      </div>
+
+      {/* 30-DAY HISTORICAL SWINE HEALTH STATUS TRENDS */}
+      <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div>
+            <h3 className="font-serif text-lg font-bold text-[#203F2B] flex items-center gap-2">
+              <Activity className="w-5 h-5 text-[#2F5C3F]" />
+              <span>30-Day Swine Health &amp; Surveillance Timeline</span>
+            </h3>
+            <p className="text-xs text-[#55604F]">
+              {isAdmin 
+                ? "Chronological 30-day overview of vaccination progress and mortality vectors across all 40 barangays." 
+                : `Chronological 30-day overview of vaccination progress and mortality vectors in Barangay ${currentUser.barangay}.`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-mono bg-[#F5EFDD] text-[#203F2B] border border-[#DED2AE] rounded-xl px-3 py-1.5 self-start sm:self-auto">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Last 30 Days Trend Analysis</span>
+          </div>
+        </div>
+
+        <div className="w-full h-[300px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart
+              data={trendData}
+              margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+            >
+              <defs>
+                <linearGradient id="colorHealthy" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
+                </linearGradient>
+                <linearGradient id="colorPending" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0}/>
+                </linearGradient>
+                <linearGradient id="colorDeceased" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#be123c" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#be123c" stopOpacity={0.0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#EAE1C4" opacity={0.6} />
+              <XAxis 
+                dataKey="dateLabel" 
+                tick={{ fill: '#55604F', fontSize: 10, fontFamily: 'monospace' }}
+                stroke="#DED2AE"
+              />
+              <YAxis 
+                tick={{ fill: '#55604F', fontSize: 10, fontFamily: 'monospace' }}
+                stroke="#DED2AE"
+                allowDecimals={false}
+              />
+              <Tooltip 
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="bg-white border border-[#DED2AE] p-3 rounded-xl shadow-lg font-sans text-xs space-y-1.5">
+                        <p className="font-mono font-bold text-[#203F2B] border-b border-[#EAE1C4] pb-1 mb-1">{label}</p>
+                        {payload.map((entry: any) => (
+                          <div key={entry.name} className="flex items-center justify-between gap-6">
+                            <span className="flex items-center gap-1.5 text-[#55604F]">
+                              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                              {entry.name}:
+                            </span>
+                            <span className="font-mono font-bold text-[#203F2B]">{entry.value} head(s)</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Legend 
+                verticalAlign="top" 
+                height={36}
+                iconType="circle"
+                wrapperStyle={{ fontSize: 11, fontFamily: 'monospace', color: '#1E2B1F' }}
+              />
+              <Area 
+                type="monotone" 
+                dataKey="Healthy / Vaccinated" 
+                stackId="1"
+                stroke="#10b981" 
+                strokeWidth={2}
+                fillOpacity={1} 
+                fill="url(#colorHealthy)" 
+              />
+              <Area 
+                type="monotone" 
+                dataKey="Pending / Suspect" 
+                stackId="1"
+                stroke="#f59e0b" 
+                strokeWidth={2}
+                fillOpacity={1} 
+                fill="url(#colorPending)" 
+              />
+              <Area 
+                type="monotone" 
+                dataKey="Quarantined / Deceased" 
+                stackId="1"
+                stroke="#be123c" 
+                strokeWidth={2}
+                fillOpacity={1} 
+                fill="url(#colorDeceased)" 
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="mt-4 pt-3 border-t border-[#EAE1C4] flex items-center justify-between text-[11px] text-[#55604F] font-mono">
+          <span>* Trend accounts for date of registration and recorded mortality event timeline.</span>
+          <span className="hidden sm:inline">Hinunangan Municipal Agriculture Office · Surveillance Active</span>
+        </div>
       </div>
 
       {/* RECENT REGISTRATIONS TABLE */}

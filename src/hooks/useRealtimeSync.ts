@@ -46,21 +46,34 @@ export function useRealtimeSync({ setPigs, setUsers }: UseRealtimeSyncProps) {
         { event: '*', schema: 'public', table: 'pig_records' },
         (payload) => {
           console.log('[Realtime DB Event - pig_records]:', payload);
-          if (payload.eventType === 'INSERT' && payload.new) {
-            const newPig = rowToPig(payload.new);
-            setPigs(prev => {
-              const exists = prev.some(p => p.id === newPig.id);
-              if (exists) {
-                return prev.map(p => p.id === newPig.id ? newPig : p);
-              }
-              return [newPig, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE' && payload.new) {
-            const updatedPig = rowToPig(payload.new);
-            setPigs(prev => prev.map(p => p.id === updatedPig.id ? updatedPig : p));
-          } else if (payload.eventType === 'DELETE' && payload.old && (payload.old.id !== undefined && payload.old.id !== null)) {
-            const deletedId = String(payload.old.id);
-            setPigs(prev => prev.filter(p => p.id !== deletedId));
+          try {
+            if (payload.eventType === 'INSERT' && payload.new && payload.new.id) {
+              const newPig = rowToPig(payload.new);
+              if (!newPig || !newPig.id) return;
+              setPigs(prev => {
+                const arr = Array.isArray(prev) ? prev : [];
+                const exists = arr.some(p => p && p.id === newPig.id);
+                if (exists) {
+                  return arr.map(p => p && p.id === newPig.id ? newPig : p);
+                }
+                return [newPig, ...arr];
+              });
+            } else if (payload.eventType === 'UPDATE' && payload.new && payload.new.id) {
+              const updatedPig = rowToPig(payload.new);
+              if (!updatedPig || !updatedPig.id) return;
+              setPigs(prev => {
+                const arr = Array.isArray(prev) ? prev : [];
+                return arr.map(p => p && p.id === updatedPig.id ? updatedPig : p);
+              });
+            } else if (payload.eventType === 'DELETE' && payload.old && (payload.old.id !== undefined && payload.old.id !== null)) {
+              const deletedId = String(payload.old.id);
+              setPigs(prev => {
+                const arr = Array.isArray(prev) ? prev : [];
+                return arr.filter(p => p && p.id !== deletedId);
+              });
+            }
+          } catch (err) {
+            console.error('Error handling realtime pig record update:', err);
           }
         }
       )
@@ -69,21 +82,34 @@ export function useRealtimeSync({ setPigs, setUsers }: UseRealtimeSyncProps) {
         { event: '*', schema: 'public', table: 'users' },
         (payload) => {
           console.log('[Realtime DB Event - users]:', payload);
-          if (payload.eventType === 'INSERT' && payload.new) {
-            const newUser = rowToUser(payload.new);
-            setUsers(prev => {
-              const exists = prev.some(u => u.username === newUser.username);
-              if (exists) {
-                return prev.map(u => u.username === newUser.username ? newUser : u);
-              }
-              return [...prev, newUser];
-            });
-          } else if (payload.eventType === 'UPDATE' && payload.new) {
-            const updatedUser = rowToUser(payload.new);
-            setUsers(prev => prev.map(u => u.username === updatedUser.username ? updatedUser : u));
-          } else if (payload.eventType === 'DELETE' && payload.old && payload.old.username) {
-            const deletedUsername = String(payload.old.username);
-            setUsers(prev => prev.filter(u => u.username !== deletedUsername));
+          try {
+            if (payload.eventType === 'INSERT' && payload.new && payload.new.username) {
+              const newUser = rowToUser(payload.new);
+              if (!newUser || !newUser.username) return;
+              setUsers(prev => {
+                const arr = Array.isArray(prev) ? prev : [];
+                const exists = arr.some(u => u && u.username === newUser.username);
+                if (exists) {
+                  return arr.map(u => u && u.username === newUser.username ? newUser : u);
+                }
+                return [...arr, newUser];
+              });
+            } else if (payload.eventType === 'UPDATE' && payload.new && payload.new.username) {
+              const updatedUser = rowToUser(payload.new);
+              if (!updatedUser || !updatedUser.username) return;
+              setUsers(prev => {
+                const arr = Array.isArray(prev) ? prev : [];
+                return arr.map(u => u && u.username === updatedUser.username ? updatedUser : u);
+              });
+            } else if (payload.eventType === 'DELETE' && payload.old && payload.old.username) {
+              const deletedUsername = String(payload.old.username);
+              setUsers(prev => {
+                const arr = Array.isArray(prev) ? prev : [];
+                return arr.filter(u => u && u.username !== deletedUsername);
+              });
+            }
+          } catch (err) {
+            console.error('Error handling realtime user update:', err);
           }
         }
       )

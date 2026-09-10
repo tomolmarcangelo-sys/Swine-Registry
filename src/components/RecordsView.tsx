@@ -465,12 +465,70 @@ export const RecordsView: React.FC<RecordsViewProps> = ({
         </div>
 
         {filteredPigs.length === 0 ? (
-          <div className="p-12 text-center text-[#55604F] space-y-3">
-            <AlertCircle className="w-10 h-10 mx-auto text-[#D9A441] opacity-60" />
-            <div className="font-serif text-lg text-[#203F2B]">{t('records.noRecordsFound')}</div>
-            <p className="text-xs max-w-sm mx-auto">
-              {t('records.noRecordsSub')}
-            </p>
+          <div className="p-8 sm:p-16 text-center max-w-2xl mx-auto space-y-6">
+            <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+              <div className="absolute inset-0 bg-[#F5EFDD] rounded-full scale-110 opacity-70 animate-pulse" />
+              <div className="absolute inset-2 bg-[#EAE1C4] rounded-full" />
+              <div className="relative p-4 bg-[#203F2B] text-[#D9A441] rounded-3xl shadow-lg">
+                <ShieldCheck className="w-10 h-10" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="font-serif text-xl sm:text-2xl font-black text-[#203F2B]">
+                {t('records.noRecordsFound')}
+              </h3>
+              <p className="text-xs sm:text-sm text-[#55604F] leading-relaxed max-w-md mx-auto">
+                No active swine registrations found matching your selected filters. Let's register a new herd to start surveillance!
+              </p>
+            </div>
+
+            {/* Quick-Start Instruction Guide */}
+            <div className="bg-[#FAF6EC] border border-[#DED2AE] rounded-2xl p-4 sm:p-5 text-left space-y-3.5 shadow-3xs">
+              <span className="font-mono text-[10px] font-bold text-[#203F2B] uppercase tracking-wider block border-b border-[#EAE1C4] pb-2">
+                📋 Field Registration Quick Steps
+              </span>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-[#203F2B]">
+                    <span className="w-5 h-5 rounded-full bg-[#203F2B] text-white flex items-center justify-center text-[10px] font-mono">1</span>
+                    <span>Click '+ Add'</span>
+                  </div>
+                  <p className="text-[#55604F] text-[11px] leading-normal pl-6">
+                    Click the button below or topbar action to launch the registry form.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-[#203F2B]">
+                    <span className="w-5 h-5 rounded-full bg-[#203F2B] text-white flex items-center justify-center text-[10px] font-mono">2</span>
+                    <span>Fill &amp; Plot</span>
+                  </div>
+                  <p className="text-[#55604F] text-[11px] leading-normal pl-6">
+                    Enter the ear-tag ID, owner info, and plot the precise farm coordinate.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-[#203F2B]">
+                    <span className="w-5 h-5 rounded-full bg-[#203F2B] text-white flex items-center justify-center text-[10px] font-mono">3</span>
+                    <span>Local &amp; Sync</span>
+                  </div>
+                  <p className="text-[#55604F] text-[11px] leading-normal pl-6">
+                    Save offline instantly; it syncs automatically when connection returns.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={onOpenAddModal}
+              className="px-6 py-3 bg-[#203F2B] hover:bg-[#2F5C3F] text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-95 inline-flex items-center gap-2 cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-[#D9A441]" />
+              <span>Register First Swine Record</span>
+            </button>
           </div>
         ) : (
           <>

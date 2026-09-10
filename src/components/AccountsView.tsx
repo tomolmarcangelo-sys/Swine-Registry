@@ -25,12 +25,21 @@ import {
   Radio,
   Clock,
   Send,
-  Activity
+  Activity,
+  ClipboardList,
+  ArrowLeft,
+  Edit3,
+  Power,
+  UserX,
+  Search,
+  Lock,
+  X
 } from 'lucide-react';
 import { BARANGAYS_DATA } from '../data/constants';
-import { PigRecord, User, SyncQueueItem, SystemSettings } from '../types';
-import { compressImageToBase64 } from '../services/imageUpload';
+import { PigRecord, User, SyncQueueItem, SystemSettings, AppViewMode } from '../types';
+import { uploadImageToSupabase } from '../services/supabaseClient';
 import { DiagnosticPage } from './DiagnosticPage';
+import { AuditLogsTab } from './AuditLogsTab';
 import { 
   downloadJsonBackup, 
   parseAndValidateBackupJson, 
@@ -43,6 +52,7 @@ interface AccountsViewProps {
   users: User[];
   pigs: PigRecord[];
   onAddUser: (user: User) => void;
+  onUpdateUser?: (user: User) => void;
   onDeleteUser: (username: string) => void;
   onRestoreData: (restoredPigs: PigRecord[], restoredUsers: User[]) => void;
   onResetData: () => void;
@@ -55,12 +65,15 @@ interface AccountsViewProps {
   isSyncing?: boolean;
   systemSettings?: SystemSettings;
   onUpdateSettings?: (settings: SystemSettings) => void;
+  currentUser?: User | null;
+  onNavigate?: (view: AppViewMode) => void;
 }
 
 export const AccountsView: React.FC<AccountsViewProps> = ({
   users,
   pigs,
   onAddUser,
+  onUpdateUser,
   onDeleteUser,
   onRestoreData,
   onResetData,
@@ -72,12 +85,18 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
   onTriggerSync,
   isSyncing = false,
   systemSettings = {},
-  onUpdateSettings
+  onUpdateSettings,
+  currentUser = null,
+  onNavigate
 }) => {
-  const [activeTab, setActiveTab] = useState<'accounts' | 'backup' | 'sync' | 'settings' | 'diagnostics'>('accounts');
+  const [activeTab, setActiveTab] = useState<'accounts' | 'backup' | 'sync' | 'settings' | 'diagnostics' | 'audit'>('accounts');
   const [settingsForm, setSettingsForm] = useState<SystemSettings>(systemSettings);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState('');
+
+  React.useEffect(() => {
+    setSettingsForm(systemSettings);
+  }, [JSON.stringify(systemSettings)]);
 
 
   // Account creation form state
@@ -90,6 +109,79 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
   const [avatarUrl, setAvatarUrl] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // User Accounts Filter & Edit State
+  const [userSearch, setUserSearch] = useState('');
+  const [userBrgyFilter, setUserBrgyFilter] = useState('all');
+  const [userStatusFilter, setUserStatusFilter] = useState('all');
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editFullName, setEditFullName] = useState('');
+  const [editBarangay, setEditBarangay] = useState('');
+  const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
+  const [editIsActive, setEditIsActive] = useState<boolean>(true);
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editMsg, setEditMsg] = useState<string | null>(null);
+
+  const openEditModal = (u: User) => {
+    setEditingUser(u);
+    setEditFullName(u.fullName);
+    setEditBarangay(u.barangay || BARANGAYS_DATA[0].name);
+    setEditRole(u.role);
+    setEditIsActive(u.isActive !== false && u.is_active !== false);
+    setEditPhone(u.phone || '');
+    setEditEmail(u.email || '');
+    setEditPassword('');
+    setEditMsg(null);
+    setIsEditModalOpen(true);
+  };
+
+  const handleUpdateSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+
+    const updated: User = {
+      ...editingUser,
+      fullName: editFullName.trim(),
+      barangay: editRole === 'admin' ? null : editBarangay,
+      role: editRole,
+      isActive: editIsActive,
+      is_active: editIsActive,
+      phone: editPhone.trim() || undefined,
+      email: editEmail.trim() || undefined,
+      password: editPassword ? editPassword : editingUser.password,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (onUpdateUser) {
+      onUpdateUser(updated);
+    } else {
+      onAddUser(updated);
+    }
+
+    setSuccessMsg(`Account for "${updated.fullName}" updated successfully.`);
+    setIsEditModalOpen(false);
+    setEditingUser(null);
+    setTimeout(() => setSuccessMsg(null), 3500);
+  };
+
+  const handleToggleUserStatus = (u: User) => {
+    const newStatus = !(u.isActive !== false && u.is_active !== false);
+    const updated: User = {
+      ...u,
+      isActive: newStatus,
+      is_active: newStatus,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (onUpdateUser) {
+      onUpdateUser(updated);
+    } else {
+      onAddUser(updated);
+    }
+  };
 
   // Backup & Restore states
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
@@ -244,13 +336,24 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
       
       {/* HEADER & TOP LEVEL TAB NAVIGATION */}
       <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#203F2B]">
-            Administration &amp; System Settings
-          </h2>
-          <p className="text-xs text-[#55604F]">
-            Manage municipal focal person accounts, database persistence, and JSON backup/restore utilities.
-          </p>
+        <div className="flex items-center gap-3">
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('dashboard')}
+              className="p-2.5 bg-[#F5EFDD] hover:bg-[#EAE1C4] border border-[#DED2AE] text-[#203F2B] rounded-xl transition-all cursor-pointer flex items-center justify-center shadow-2xs shrink-0 active:scale-95"
+              title="Back to Dashboard"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          )}
+          <div>
+            <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#203F2B]">
+              Administration &amp; System Settings
+            </h2>
+            <p className="text-xs text-[#55604F]">
+              Manage municipal focal person accounts, database persistence, and JSON backup/restore utilities.
+            </p>
+          </div>
         </div>
 
         {/* Tab Toggle Buttons */}
@@ -358,6 +461,27 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
             )}
             <Activity className="w-4 h-4 text-[#D9A441] relative z-10" />
             <span className="relative z-10">Diagnostics &amp; Pings</span>
+          </button>
+
+          <button
+            type="button"
+            data-audit-tab-btn
+            onClick={() => setActiveTab('audit')}
+            className={`relative px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer ${
+              activeTab === 'audit'
+                ? 'text-white'
+                : 'text-[#55604F] hover:text-[#1E2B1F]'
+            }`}
+          >
+            {activeTab === 'audit' && (
+              <motion.div
+                layoutId="activeAccountsTabPill"
+                className="absolute inset-0 bg-[#2F5C3F] rounded-lg shadow-xs"
+                transition={{ type: "spring", stiffness: 400, damping: 32 }}
+              />
+            )}
+            <ClipboardList className="w-4 h-4 text-emerald-400 relative z-10" />
+            <span className="relative z-10">Audit Logs</span>
           </button>
         </div>
       </div>
@@ -504,70 +628,326 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
 
           {/* ALL ACCOUNTS TABLE */}
           <div className="bg-white border border-[#DED2AE] rounded-2xl shadow-xs overflow-hidden">
-            <div className="px-5 py-3.5 bg-[#FBF8EF] border-b border-[#DED2AE] flex items-center justify-between text-xs">
+            <div className="px-5 py-4 bg-[#FBF8EF] border-b border-[#DED2AE] flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-2">
                 <Users className="w-4 h-4 text-[#2F5C3F]" />
-                <span className="font-bold text-[#203F2B]">Configured User Accounts ({users.length})</span>
+                <span className="font-bold text-[#203F2B] text-sm font-serif">Configured User Accounts</span>
+                <span className="bg-[#2F5C3F]/10 text-[#2F5C3F] font-bold px-2 py-0.5 rounded-full text-[11px]">
+                  {users.length} Total
+                </span>
+              </div>
+
+              {/* FILTER CONTROLS */}
+              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                <div className="relative flex-1 sm:w-48">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#55604F]" />
+                  <input
+                    type="text"
+                    placeholder="Search name/user..."
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    className="w-full bg-white border border-[#DED2AE] rounded-xl pl-8 pr-3 py-1.5 text-xs text-[#1E2B1F] focus:outline-none focus:border-[#2F5C3F]"
+                  />
+                  {userSearch && (
+                    <button
+                      onClick={() => setUserSearch('')}
+                      className="absolute right-2 top-2 text-[#55604F] hover:text-[#1E2B1F]"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                <select
+                  value={userBrgyFilter}
+                  onChange={(e) => setUserBrgyFilter(e.target.value)}
+                  className="bg-white border border-[#DED2AE] rounded-xl px-2.5 py-1.5 text-xs text-[#1E2B1F] focus:outline-none focus:border-[#2F5C3F]"
+                >
+                  <option value="all">All Barangays</option>
+                  {BARANGAYS_DATA.map(b => (
+                    <option key={b.name} value={b.name}>Brgy. {b.name}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={userStatusFilter}
+                  onChange={(e) => setUserStatusFilter(e.target.value)}
+                  className="bg-white border border-[#DED2AE] rounded-xl px-2.5 py-1.5 text-xs text-[#1E2B1F] focus:outline-none focus:border-[#2F5C3F]"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="active">Active Only</option>
+                  <option value="inactive">Inactive / Suspended</option>
+                </select>
               </div>
             </div>
 
+            {/* USERS TABLE */}
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead>
                   <tr className="bg-[#F5EFDD]/70 text-[#55604F] font-mono uppercase text-[11px] border-b border-[#DED2AE]">
-                    <th className="py-3 px-4">Full Name</th>
-                    <th className="py-3 px-4">Username</th>
+                    <th className="py-3 px-4">Full Name &amp; User</th>
                     <th className="py-3 px-4">Role</th>
                     <th className="py-3 px-4">Assigned Barangay</th>
+                    <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4">Contact</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#EAE1C4]">
-                  {users.map(u => (
-                    <tr key={u.username} className="hover:bg-[#FBF8EF] transition-colors">
-                      <td className="py-3 px-4 font-bold text-[#1E2B1F]">
-                        {u.fullName}
-                      </td>
-                      <td className="py-3 px-4 font-mono text-[#203F2B]">
-                        {u.username}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                          u.role === 'admin' 
-                            ? 'bg-purple-100 text-purple-900 border border-purple-300' 
-                            : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                        }`}>
-                          {u.role === 'admin' ? 'Central Admin' : 'Barangay Focal'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-semibold text-[#1E2B1F]">
-                        {u.barangay ? `Brgy. ${u.barangay}` : 'All 40 Barangays'}
-                      </td>
-                      <td className="py-3 px-4 font-mono text-[11px] text-[#55604F]">
-                        {u.phone || u.email || '—'}
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        {u.role !== 'admin' && (
-                          <button
-                            onClick={() => {
-                              if (confirm(`Remove account for "${u.fullName}" (${u.username})?`)) {
-                                onDeleteUser(u.username);
-                              }
-                            }}
-                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg transition-colors cursor-pointer"
-                            title="Delete account"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {users
+                    .filter(u => {
+                      const matchesSearch = !userSearch || 
+                        u.fullName.toLowerCase().includes(userSearch.toLowerCase()) || 
+                        u.username.toLowerCase().includes(userSearch.toLowerCase());
+                      const matchesBrgy = userBrgyFilter === 'all' || u.barangay === userBrgyFilter;
+                      const isActive = u.isActive !== false && u.is_active !== false;
+                      const matchesStatus = userStatusFilter === 'all' || 
+                        (userStatusFilter === 'active' && isActive) || 
+                        (userStatusFilter === 'inactive' && !isActive);
+                      return matchesSearch && matchesBrgy && matchesStatus;
+                    })
+                    .map(u => {
+                      const isActive = u.isActive !== false && u.is_active !== false;
+                      return (
+                        <tr key={u.username} className="hover:bg-[#FBF8EF] transition-colors">
+                          <td className="py-3 px-4">
+                            <div className="font-bold text-[#1E2B1F] text-sm">{u.fullName}</div>
+                            <div className="font-mono text-[11px] text-[#55604F]">@{u.username}</div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              u.role === 'admin' 
+                                ? 'bg-purple-100 text-purple-900 border border-purple-300' 
+                                : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                            }`}>
+                              {u.role === 'admin' ? 'Central Admin' : 'Barangay Focal'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-semibold text-[#1E2B1F]">
+                            {u.barangay ? `Brgy. ${u.barangay}` : 'All 40 Barangays'}
+                          </td>
+                          <td className="py-3 px-4">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleUserStatus(u)}
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-transform active:scale-95 ${
+                                isActive 
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200' 
+                                  : 'bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200'
+                              }`}
+                              title="Click to toggle active / suspended status"
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-600' : 'bg-rose-600'}`} />
+                              <span>{isActive ? 'Active' : 'Suspended'}</span>
+                            </button>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-[11px] text-[#55604F]">
+                            <div>{u.phone || '—'}</div>
+                            {u.email && <div className="text-[10px] text-[#55604F]/80">{u.email}</div>}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(u)}
+                                className="px-2.5 py-1 bg-[#F5EFDD] hover:bg-[#EAE1C4] text-[#203F2B] border border-[#DED2AE] rounded-lg transition-colors flex items-center gap-1 font-semibold text-[11px] cursor-pointer"
+                                title="Edit user details and permissions"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 text-[#2F5C3F]" />
+                                <span>Edit</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const auditTabBtn = document.querySelector('[data-audit-tab-btn]') as HTMLButtonElement;
+                                  if (auditTabBtn) auditTabBtn.click();
+                                  window.dispatchEvent(new CustomEvent('filter-audit-logs', { detail: u.username }));
+                                }}
+                                className="px-2.5 py-1 bg-[#F5EFDD] hover:bg-[#EAE1C4] text-[#203F2B] border border-[#DED2AE] rounded-lg transition-colors flex items-center gap-1 font-semibold text-[11px] cursor-pointer"
+                                title="View activity log history for this account"
+                              >
+                                <ClipboardList className="w-3.5 h-3.5 text-[#2F5C3F]" />
+                                <span>Logs</span>
+                              </button>
+
+                              {u.role !== 'admin' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirm(`Are you sure you want to permanently delete account for "${u.fullName}" (@${u.username})?`)) {
+                                      onDeleteUser(u.username);
+                                    }
+                                  }}
+                                  className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                                  title="Permanently remove account"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
           </div>
+
+          {/* EDIT USER MODAL */}
+          <AnimatePresence>
+            {isEditModalOpen && editingUser && (
+              <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-white border border-[#DED2AE] rounded-2xl p-6 shadow-2xl max-w-lg w-full space-y-4"
+                >
+                  <div className="flex items-center justify-between pb-3 border-b border-[#EAE1C4]">
+                    <div className="flex items-center gap-2">
+                      <Edit3 className="w-5 h-5 text-[#2F5C3F]" />
+                      <h3 className="font-serif text-lg font-bold text-[#203F2B]">
+                        Edit User Account: @{editingUser.username}
+                      </h3>
+                    </div>
+                    <button
+                      onClick={() => setIsEditModalOpen(false)}
+                      className="p-1.5 text-[#55604F] hover:text-[#1E2B1F] rounded-lg cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {editMsg && (
+                    <div className="bg-rose-50 border border-rose-200 text-rose-800 text-xs px-3.5 py-2.5 rounded-xl">
+                      {editMsg}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleUpdateSubmit} className="space-y-4 text-xs">
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                        Full Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={editFullName}
+                        onChange={(e) => setEditFullName(e.target.value)}
+                        className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 text-xs text-[#1E2B1F] focus:bg-white focus:border-[#2F5C3F] outline-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                          Role *
+                        </label>
+                        <select
+                          value={editRole}
+                          onChange={(e) => setEditRole(e.target.value as 'admin' | 'user')}
+                          className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 text-xs text-[#1E2B1F] focus:bg-white focus:border-[#2F5C3F] outline-none"
+                        >
+                          <option value="user">Barangay Focal</option>
+                          <option value="admin">Central Administrator</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                          Assigned Barangay
+                        </label>
+                        <select
+                          disabled={editRole === 'admin'}
+                          value={editBarangay}
+                          onChange={(e) => setEditBarangay(e.target.value)}
+                          className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 text-xs text-[#1E2B1F] focus:bg-white focus:border-[#2F5C3F] outline-none disabled:opacity-50"
+                        >
+                          {BARANGAYS_DATA.map(b => (
+                            <option key={b.name} value={b.name}>Brgy. {b.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                          Account Status
+                        </label>
+                        <select
+                          value={editIsActive ? 'active' : 'inactive'}
+                          onChange={(e) => setEditIsActive(e.target.value === 'active')}
+                          className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 text-xs text-[#1E2B1F] focus:bg-white focus:border-[#2F5C3F] outline-none"
+                        >
+                          <option value="active">Active (Access Allowed)</option>
+                          <option value="inactive">Suspended / Deactivated</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                          Reset Password (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Leave blank to keep current"
+                          value={editPassword}
+                          onChange={(e) => setEditPassword(e.target.value)}
+                          className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 text-xs text-[#1E2B1F] focus:bg-white focus:border-[#2F5C3F] outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                          Contact Phone
+                        </label>
+                        <input
+                          type="text"
+                          value={editPhone}
+                          onChange={(e) => setEditPhone(e.target.value)}
+                          className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 text-xs text-[#1E2B1F] focus:bg-white focus:border-[#2F5C3F] outline-none font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                          Email Address
+                        </label>
+                        <input
+                          type="email"
+                          value={editEmail}
+                          onChange={(e) => setEditEmail(e.target.value)}
+                          className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 text-xs text-[#1E2B1F] focus:bg-white focus:border-[#2F5C3F] outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-3 border-t border-[#EAE1C4]">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditModalOpen(false)}
+                        className="px-4 py-2 bg-[#F5EFDD] hover:bg-[#EAE1C4] text-[#203F2B] font-semibold rounded-xl text-xs cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-5 py-2 bg-[#2F5C3F] hover:bg-[#203F2B] text-white font-bold rounded-xl text-xs shadow-xs cursor-pointer"
+                      >
+                        Save Changes
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
         </motion.div>
       )}
 
@@ -1146,14 +1526,63 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      const base64 = await compressImageToBase64(file, 1200);
-                      setSettingsForm({ ...settingsForm, landingHeroPhotoUrl: base64 });
+                      const url = await uploadImageToSupabase(file);
+                      if (url) setSettingsForm({ ...settingsForm, landingHeroPhotoUrl: url });
                     }
                   }}
                   className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 focus:bg-white focus:border-[#2F5C3F] outline-none"
                 />
                 {settingsForm.landingHeroPhotoUrl && (
                   <img src={settingsForm.landingHeroPhotoUrl} className="mt-2 h-24 object-cover rounded-xl" alt="Preview" />
+                )}
+              </div>
+
+              <div className="sm:col-span-2 border-t border-[#EAE1C4] pt-4 mt-2">
+                <h4 className="font-serif font-bold text-sm text-[#203F2B] mb-2">Office Brand Logo</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                      Logo Upload (Local File)
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const url = await uploadImageToSupabase(file);
+                          if (url) setSettingsForm({ ...settingsForm, logoUrl: url });
+                        }
+                      }}
+                      className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 focus:bg-white focus:border-[#2F5C3F] outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                      Logo Image Link (URL)
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://example.com/logo.png"
+                      value={settingsForm.logoUrl || ''}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, logoUrl: e.target.value })}
+                      className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2 focus:bg-white focus:border-[#2F5C3F] outline-none"
+                    />
+                  </div>
+                </div>
+                {settingsForm.logoUrl && (
+                  <div className="mt-3 flex items-center gap-3 bg-[#FBF8EF] p-2.5 rounded-xl border border-[#DED2AE]/60 max-w-sm">
+                    <img 
+                      src={settingsForm.logoUrl} 
+                      className="w-12 h-12 rounded-full border-2 border-[#D9A441] object-cover bg-white shrink-0" 
+                      alt="Logo Preview" 
+                      referrerPolicy="no-referrer"
+                    />
+                    <div>
+                      <span className="font-semibold text-xs text-[#203F2B] block">Logo Preview</span>
+                      <span className="text-[10px] text-[#55604F] block truncate max-w-[200px]">{settingsForm.logoUrl}</span>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -1191,6 +1620,19 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
           transition={{ duration: 0.18 }}
         >
           <DiagnosticPage />
+        </motion.div>
+      )}
+
+      {/* TAB 6: AUDIT LOGS */}
+      {activeTab === 'audit' && (
+        <motion.div
+          key="tab-audit"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+        >
+          <AuditLogsTab currentUser={currentUser} onNavigate={onNavigate} />
         </motion.div>
       )}
       </AnimatePresence>

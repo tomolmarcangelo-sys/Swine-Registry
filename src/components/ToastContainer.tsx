@@ -19,6 +19,19 @@ export interface ToastItem {
   timestamp: Date;
 }
 
+export function showAppToast(
+  title: string, 
+  message: string, 
+  type: 'success' | 'warning' | 'error' | 'info' | 'sync' | 'conflict' = 'info',
+  duration: number = 4500
+) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('hinunangan_toast', {
+      detail: { title, message, type, duration }
+    }));
+  }
+}
+
 export default function ToastContainer() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -44,6 +57,18 @@ export default function ToastContainer() {
 
   // Listen to system custom events & network events
   useEffect(() => {
+    const handleGenericToast = (e: any) => {
+      const { title, message, type, duration } = e.detail || {};
+      if (title || message) {
+        addToast({
+          type: type || 'info',
+          title: title || 'Notice',
+          message: message || '',
+          duration: duration || 4500
+        });
+      }
+    };
+
     const handleSyncComplete = (e: any) => {
       const { successCount } = e.detail || {};
       if (successCount > 0) {
@@ -88,12 +113,14 @@ export default function ToastContainer() {
       });
     };
 
+    window.addEventListener('hinunangan_toast', handleGenericToast);
     window.addEventListener('hinunangan_data_synced', handleSyncComplete);
     window.addEventListener('hinunangan_sync_conflict', handleSyncConflict);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
     return () => {
+      window.removeEventListener('hinunangan_toast', handleGenericToast);
       window.removeEventListener('hinunangan_data_synced', handleSyncComplete);
       window.removeEventListener('hinunangan_sync_conflict', handleSyncConflict);
       window.removeEventListener('online', handleOnline);

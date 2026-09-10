@@ -41,7 +41,10 @@ import {
   AlertTriangle,
   Printer,
   FileText,
-  Target
+  Target,
+  Mountain,
+  Satellite,
+  Globe
 } from 'lucide-react';
 import { 
   BARANGAYS_DATA, 
@@ -342,14 +345,47 @@ export const GisMap: React.FC<GisMapProps> = ({
   const [selectedPurpose, setSelectedPurpose] = useState<string>('all');
   const [selectedHealth, setSelectedHealth] = useState<'all' | 'vax' | 'unvax'>('all');
 
-  // Selected Pin / Detail Card
+  // Selected Pin / Detail Card & Photo Modal
   const [selectedPig, setSelectedPig] = useState<PigRecord | null>(null);
+  const [expandedPhoto, setExpandedPhoto] = useState<{ url: string; earTag: string; ownerName: string; breed?: string; barangay?: string } | null>(null);
+
+  // Global listeners for Leaflet Popup action events
+  useEffect(() => {
+    const handleOpenPhotoEvent = (e: any) => {
+      if (e.detail?.url) {
+        setExpandedPhoto(e.detail);
+      }
+    };
+    const handleEditPigFromEvent = (e: any) => {
+      const target = (pigs || []).find(p => p.id === e.detail?.pigId);
+      if (target) {
+        onEditPig(target);
+      }
+    };
+    const handleSelectPigFromEvent = (e: any) => {
+      const target = (pigs || []).find(p => p.id === e.detail?.pigId);
+      if (target) {
+        setSelectedPig(target);
+      }
+    };
+
+    window.addEventListener('hinunangan_open_photo', handleOpenPhotoEvent);
+    window.addEventListener('hinunangan_edit_pig_id', handleEditPigFromEvent);
+    window.addEventListener('hinunangan_select_pig_id', handleSelectPigFromEvent);
+
+    return () => {
+      window.removeEventListener('hinunangan_open_photo', handleOpenPhotoEvent);
+      window.removeEventListener('hinunangan_edit_pig_id', handleEditPigFromEvent);
+      window.removeEventListener('hinunangan_select_pig_id', handleSelectPigFromEvent);
+    };
+  }, [pigs, onEditPig]);
 
   // UI Panels (Legend collapsed by default)
   const [isLegendOpen, setIsLegendOpen] = useState<boolean>(false);
   const [legendTab, setLegendTab] = useState<'markers' | 'heatmap'>('markers');
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState<boolean>(false);
   const [isLayersPanelOpen, setIsLayersPanelOpen] = useState<boolean>(false);
+  const [isStylePickerOpen, setIsStylePickerOpen] = useState<boolean>(false);
   const [gpsLocating, setGpsLocating] = useState<boolean>(false);
 
   // Filter visible pigs based on user role and search filters
@@ -726,29 +762,59 @@ export const GisMap: React.FC<GisMapProps> = ({
 
     const renderSinglePigMarker = (pig: PigRecord) => {
       const isDeceased = pig.isDeceased;
-      const color = isDeceased ? '#7F1D1D' : (PURPOSE_COLORS[pig.purpose] || '#2F5C3F');
       const isVaccinated = pig.vaccinated;
+      const bioEval = evaluatePigBiosecurity(pig);
+      const isCritical = bioEval.isCriticalHotspot || !isVaccinated || isDeceased;
+      const color = PURPOSE_COLORS[pig.purpose] || '#2F5C3F';
+
+      // Determine SVG icon and styling based on health & biosecurity risk status
+      let pinColor = '#2F5C3F'; // Default green (compliant / healthy)
+      let borderColor = '#FFFFFF';
+      let pulseRing = '';
+      let svgSymbol = '';
+
+      if (isDeceased) {
+        pinColor = '#7F1D1D'; // Dark red for mortality / deceased
+        borderColor = '#FCA5A5';
+        pulseRing = `<div class="animate-pulse-quarantine" style="position: absolute; inset: -5px; border-radius: 50%; background: #7F1D1D; opacity: 0.35;"></div>`;
+        svgSymbol = `<path d="M9 2a1 1 0 00-1 1v1H6a2 2 0 00-2 2v2a2 2 0 002 2h4a2 2 0 002-2V6a2 2 0 00-2-2h-2V3a1 1 0 00-1-1zm0 8a3 3 0 100 6 3 3 0 000-6zm-4.5 9a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm9 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" fill="white"/>`;
+      } else if (isCritical) {
+        pinColor = '#DC2626'; // Vibrant red pulse for critical / unvaccinated / ASF risk
+        borderColor = '#FEE2E2';
+        pulseRing = `<div class="animate-pulse-red" style="position: absolute; inset: -4px; border-radius: 50%; background: #EF4444; opacity: 0.4;"></div>`;
+        svgSymbol = `<path d="M12 2L1 21h22L12 2zm1 14h-2v-2h2v2zm0-4h-2V8h2v4z" fill="white"/>`;
+      } else if (!isVaccinated) {
+        pinColor = '#D97706'; // Amber for pending vaccination
+        borderColor = '#FEF3C7';
+        svgSymbol = `<path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" fill="white"/>`;
+      } else {
+        pinColor = '#059669'; // Emerald green for fully compliant & vaccinated
+        borderColor = '#A7F3D0';
+        svgSymbol = `<path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" fill="white"/>`;
+      }
 
       const markerHtml = `
-        <div class="group cursor-pointer hover:scale-110 active:scale-95" style="position: relative; display: flex; flex-direction: column; align-items: center; transition: transform 0.2s ease;">
+        <div class="group cursor-pointer hover:scale-115 active:scale-90" style="position: relative; display: flex; flex-direction: column; align-items: center; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);">
+          ${pulseRing}
           <div style="
-            width: 26px; 
-            height: 26px; 
+            width: 32px; 
+            height: 32px; 
             border-radius: 50%; 
-            background: ${color}; 
-            border: 2px solid ${isDeceased ? '#FCA5A5' : 'white'}; 
-            box-shadow: 0 3px 8px rgba(0,0,0,0.4); 
+            background: ${pinColor}; 
+            border: 2.5px solid ${borderColor}; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.35); 
             display: flex; 
             align-items: center; 
             justify-content: center; 
-            color: white; 
-            font-size: 11px;
-            font-weight: bold;
+            position: relative;
+            z-index: 2;
           ">
-            ${isDeceased ? '💀' : (isVaccinated ? '🛡️' : '⚠️')}
+            <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+              ${svgSymbol}
+            </svg>
           </div>
-          <div style="width: 2px; height: 6px; background: ${isDeceased ? '#7F1D1D' : '#203F2B'};"></div>
-          <div style="width: 6px; height: 3px; border-radius: 50%; background: rgba(0,0,0,0.35);"></div>
+          <div style="width: 2.5px; height: 8px; background: ${pinColor}; border-radius: 1px; margin-top: -1px; z-index: 1;"></div>
+          <div style="width: 8px; height: 3px; border-radius: 50%; background: rgba(0,0,0,0.4);"></div>
         </div>
       `;
 
@@ -776,78 +842,121 @@ export const GisMap: React.FC<GisMapProps> = ({
           ? `<span style="background: rgba(16, 185, 129, 0.15); color: #047857; border: 1px solid rgba(16, 185, 129, 0.35); padding: 2px 6px; border-radius: 6px; font-weight: 700; font-size: 10px;">🛡️ Vaccinated (Protected)</span>`
           : `<span style="background: rgba(239, 68, 68, 0.15); color: #B91C1C; border: 1px solid rgba(239, 68, 68, 0.35); padding: 2px 6px; border-radius: 6px; font-weight: 700; font-size: 10px;">⚠️ Unvaccinated / Due</span>`);
 
-      const tooltipContent = `
+      // Rich Leaflet Popup Card Content
+      const safeEarTag = pig.earTag.replace(/'/g, "\\'");
+      const safeOwnerName = pig.ownerName.replace(/'/g, "\\'");
+      const safeBreed = (pig.breed || 'Native').replace(/'/g, "\\'");
+      const safeBrgy = pig.barangay.replace(/'/g, "\\'");
+      const photoSrc = pig.photoUrl || '';
+
+      const photoHtml = photoSrc 
+        ? `
+          <div style="position: relative; width: 68px; height: 68px; border-radius: 12px; overflow: hidden; border: 2px solid #D9A441; flex-shrink: 0; background: #000; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+            <img src="${photoSrc}" alt="Swine photo" style="width: 100%; height: 100%; object-fit: cover;" />
+            <button 
+              type="button"
+              onclick="window.dispatchEvent(new CustomEvent('hinunangan_open_photo', { detail: { url: '${photoSrc}', earTag: '${safeEarTag}', ownerName: '${safeOwnerName}', breed: '${safeBreed}', barangay: '${safeBrgy}' } }))"
+              style="position: absolute; inset: 0; background: rgba(0,0,0,0.4); color: #FFF; font-size: 9px; font-weight: bold; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: opacity 0.2s;"
+              onmouseover="this.style.opacity='1'"
+              onmouseout="this.style.opacity='0'"
+              title="Click to view high-resolution photo"
+            >
+              🔍 Zoom
+            </button>
+          </div>
+        `
+        : `
+          <div style="width: 68px; height: 68px; border-radius: 12px; border: 2px dashed #DED2AE; background: #EAE1C4; display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0; color: #55604F;">
+            <span style="font-size: 20px;">🐖</span>
+            <span style="font-size: 8px; font-weight: bold; text-transform: uppercase; margin-top: 2px;">No Photo</span>
+          </div>
+        `;
+
+      const popupContent = `
         <div style="
           background: #F5EFDD; 
           color: #1E2B1F; 
           border: 2px solid #D9A441; 
-          border-radius: 14px; 
-          padding: 10px 12px; 
-          box-shadow: 0 10px 25px rgba(0,0,0,0.35); 
+          border-radius: 16px; 
+          padding: 12px; 
+          box-shadow: 0 14px 35px rgba(0,0,0,0.38); 
           font-family: system-ui, -apple-system, sans-serif; 
           font-size: 11px; 
-          width: 240px; 
-          pointer-events: none;
+          width: 275px; 
           line-height: 1.4;
         ">
           <!-- Card Header -->
-          <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #DED2AE; padding-bottom: 6px; margin-bottom: 6px;">
-            <div style="font-family: monospace; font-weight: 800; font-size: 12px; color: #203F2B; display: flex; align-items: center; gap: 4px;">
-              <span style="font-size: 13px;">🏷️</span>
-              <span>${pig.earTag}</span>
+          <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #DED2AE; padding-bottom: 6px; margin-bottom: 8px;">
+            <div style="font-family: monospace; font-weight: 800; font-size: 13px; color: #203F2B; display: flex; align-items: center; gap: 4px;">
+              <span style="background: #203F2B; color: #D9A441; padding: 2px 6px; border-radius: 6px;">${pig.earTag}</span>
             </div>
-            <span style="padding: 2px 6px; border-radius: 6px; font-size: 10px; font-weight: 700; background: ${color}20; color: ${color}; border: 1px solid ${color}60;">
+            <span style="padding: 2px 6px; border-radius: 6px; font-size: 10px; font-weight: 700; background: ${color}25; color: ${color}; border: 1px solid ${color}60;">
               ${pig.purpose}
             </span>
           </div>
 
-          <!-- Body Info -->
-          <div style="display: flex; flex-direction: column; gap: 4px;">
-            <div style="display: flex; justify-content: space-between; align-items: baseline;">
-              <span style="color: #55604F; font-size: 10px; font-weight: 600;">Farmer / Owner:</span>
-              <span style="font-weight: 700; color: #203F2B; max-width: 140px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${pig.ownerName}</span>
+          <!-- Top Row: Photo Thumbnail + Core Swine Specs -->
+          <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
+            ${photoHtml}
+            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+              <div style="font-weight: 800; color: #203F2B; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                ${pig.ownerName}
+              </div>
+              <div style="color: #55604F; font-size: 10px; font-weight: 600;">
+                Brgy. <b style="color: #1E2B1F;">${pig.barangay}</b>
+              </div>
+              <div style="font-family: monospace; font-size: 10px; font-weight: 700; color: #2F5C3F;">
+                ${pig.breed || 'Native'} · ${pig.sex || 'Female'} · ${pig.weight}kg
+              </div>
+              ${pig.contact ? `<a href="tel:${pig.contact}" style="color: #2F5C3F; font-size: 10px; text-decoration: none; font-weight: bold; display: flex; align-items: center; gap: 3px; margin-top: 1px;">📞 ${pig.contact}</a>` : ''}
             </div>
+          </div>
 
-            <div style="display: flex; justify-content: space-between; align-items: baseline;">
-              <span style="color: #55604F; font-size: 10px; font-weight: 600;">Location:</span>
-              <span style="font-weight: 600; color: #1E2B1F; text-align: right;">Brgy. ${pig.barangay}${pig.address ? ` (${pig.address})` : ''}</span>
-            </div>
-
-            <div style="display: flex; justify-content: space-between; align-items: baseline;">
-              <span style="color: #55604F; font-size: 10px; font-weight: 600;">Breed / Weight:</span>
-              <span style="font-family: monospace; font-weight: 800; color: #2F5C3F;">${pig.breed || 'Native'} · ${pig.weight}kg</span>
-            </div>
-
-            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 2px;">
+          <!-- Health & Biosecurity Badges -->
+          <div style="display: flex; flex-direction: column; gap: 4px; background: #FAF6EC; padding: 6px 8px; border-radius: 10px; border: 1px solid #DED2AE; margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
               <span style="color: #55604F; font-size: 10px; font-weight: 600;">Health Status:</span>
               ${healthBadge}
             </div>
-
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <span style="color: #55604F; font-size: 10px; font-weight: 600;">Biosecurity:</span>
               <span style="padding: 1px 6px; border-radius: 4px; font-size: 10px; font-family: monospace; font-weight: 700; ${bioBadgeStyle}">
                 Level ${bioLevel} (${bioScore}/7)
               </span>
             </div>
-
-            <div style="border-top: 1px dashed #DED2AE; padding-top: 4px; margin-top: 2px; font-family: monospace; font-size: 10px; color: #55604F; display: flex; justify-content: space-between;">
-              <span>GPS Pin:</span>
-              <span style="color: #203F2B; font-weight: 700;">${pig.lat.toFixed(5)}°N, ${pig.lng.toFixed(5)}°E</span>
+            <div style="display: flex; justify-content: space-between; align-items: center; font-family: monospace; font-size: 9.5px; color: #55604F; border-top: 1px dashed #DED2AE; padding-top: 3px; margin-top: 2px;">
+              <span>GPS Coordinates:</span>
+              <b style="color: #203F2B;">${pig.lat.toFixed(5)}°, ${pig.lng.toFixed(5)}°</b>
             </div>
           </div>
 
-          <!-- Footer prompt -->
-          <div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid #DED2AE; font-size: 9px; color: #2F5C3F; font-weight: 700; text-align: center; background: #EAE1C4; border-radius: 6px; padding: 3px 0;">
-            🖱️ Click pin to view full details &amp; audit history
+          <!-- Interactive Action Buttons -->
+          <div style="display: grid; grid-template-columns: ${photoSrc ? '1fr 1fr' : '1fr'}; gap: 6px;">
+            ${photoSrc ? `
+              <button 
+                type="button" 
+                onclick="window.dispatchEvent(new CustomEvent('hinunangan_open_photo', { detail: { url: '${photoSrc}', earTag: '${safeEarTag}', ownerName: '${safeOwnerName}', breed: '${safeBreed}', barangay: '${safeBrgy}' } }))"
+                style="background: #EAE1C4; color: #203F2B; border: 1px solid #DED2AE; border-radius: 8px; padding: 5px 0; font-size: 10px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;"
+              >
+                🔍 Enlarge Photo
+              </button>
+            ` : ''}
+            <button 
+              type="button" 
+              onclick="window.dispatchEvent(new CustomEvent('hinunangan_edit_pig_id', { detail: { pigId: '${pig.id}' } }))"
+              style="background: #2F5C3F; color: #FFF; border: none; border-radius: 8px; padding: 5px 0; font-size: 10px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;"
+            >
+              ✏️ Edit Record
+            </button>
           </div>
         </div>
       `;
 
-      marker.bindTooltip(tooltipContent, {
-        direction: 'top',
+      marker.bindPopup(popupContent, {
         offset: [0, -28],
-        opacity: 1,
-        className: 'gis-custom-tooltip'
+        maxWidth: 295,
+        minWidth: 260,
+        className: 'gis-rich-popup'
       });
 
       // Click on marker
@@ -1725,8 +1834,55 @@ export const GisMap: React.FC<GisMapProps> = ({
         </div>
 
         {/* Right: Map Modes & Quick Actions */}
-        <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto bg-[#F5EFDD]/95 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-[#DED2AE] shadow-md">
+        <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto bg-[#F5EFDD]/95 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-[#DED2AE] shadow-md flex-wrap sm:flex-nowrap">
           
+          {/* Map Layer Style Switcher (Street / Satellite / Topographic) */}
+          <div className="flex items-center bg-white border border-[#DED2AE] rounded-lg p-0.5 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setActiveTile('roadmap')}
+              className={`px-2 py-1 rounded-md text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                activeTile === 'roadmap' || activeTile === 'standard'
+                  ? 'bg-[#2F5C3F] text-white shadow-xs'
+                  : 'text-[#55604F] hover:text-[#203F2B] hover:bg-[#F5EFDD]/60'
+              }`}
+              title="Street Map View (Roads, Infrastructure & Sitios)"
+            >
+              <MapIcon className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Street</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTile('satellite')}
+              className={`px-2 py-1 rounded-md text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                activeTile === 'satellite' || activeTile === 'hybrid'
+                  ? 'bg-[#2F5C3F] text-white shadow-xs'
+                  : 'text-[#55604F] hover:text-[#203F2B] hover:bg-[#F5EFDD]/60'
+              }`}
+              title="Satellite Imagery (High-Resolution Aerial Farm Canopy & Pen Structures)"
+            >
+              <Satellite className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Satellite</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTile('terrain')}
+              className={`px-2 py-1 rounded-md text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                activeTile === 'terrain' || activeTile === 'topo'
+                  ? 'bg-[#2F5C3F] text-white shadow-xs'
+                  : 'text-[#55604F] hover:text-[#203F2B] hover:bg-[#F5EFDD]/60'
+              }`}
+              title="Topographic Elevation (Contours, Terrain Slopes & Watershed Analysis)"
+            >
+              <Mountain className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Topographic</span>
+            </button>
+          </div>
+
+          <div className="h-4 w-px bg-[#DED2AE] hidden sm:block mx-0.5" />
+
           {/* Add Swine Pin Mode Button */}
           <button
             onClick={() => {
@@ -2129,27 +2285,88 @@ export const GisMap: React.FC<GisMapProps> = ({
               </button>
             </div>
 
-            {/* Base Tile Selector */}
+            {/* Base Tile Selector with Categorized Styles */}
             <div>
-              <label className="block text-[11px] font-bold uppercase text-[#55604F] mb-1.5">
-                Base Map Layer
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-bold uppercase text-[#55604F]">
+                  Base Map Style
+                </label>
+                <span className="text-[10px] font-mono text-[#2F5C3F] font-bold">
+                  {TILE_CONFIG[activeTile]?.name.split('(')[0] || 'Custom'}
+                </span>
+              </div>
+
+              {/* Quick Category Tabs */}
+              <div className="grid grid-cols-3 gap-1 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTile('roadmap')}
+                  className={`px-2 py-1.5 rounded-lg text-xs font-bold flex flex-col items-center gap-0.5 border cursor-pointer transition-all ${
+                    activeTile === 'roadmap' || activeTile === 'standard'
+                      ? 'bg-[#2F5C3F] text-white border-[#203F2B] shadow-xs'
+                      : 'bg-white text-[#55604F] border-[#DED2AE] hover:bg-[#FBF8EF]'
+                  }`}
+                >
+                  <MapIcon className="w-4 h-4" />
+                  <span>Street</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTile('satellite')}
+                  className={`px-2 py-1.5 rounded-lg text-xs font-bold flex flex-col items-center gap-0.5 border cursor-pointer transition-all ${
+                    activeTile === 'satellite' || activeTile === 'hybrid'
+                      ? 'bg-[#2F5C3F] text-white border-[#203F2B] shadow-xs'
+                      : 'bg-white text-[#55604F] border-[#DED2AE] hover:bg-[#FBF8EF]'
+                  }`}
+                >
+                  <Satellite className="w-4 h-4" />
+                  <span>Satellite</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTile('terrain')}
+                  className={`px-2 py-1.5 rounded-lg text-xs font-bold flex flex-col items-center gap-0.5 border cursor-pointer transition-all ${
+                    activeTile === 'terrain' || activeTile === 'topo'
+                      ? 'bg-[#2F5C3F] text-white border-[#203F2B] shadow-xs'
+                      : 'bg-white text-[#55604F] border-[#DED2AE] hover:bg-[#FBF8EF]'
+                  }`}
+                >
+                  <Mountain className="w-4 h-4" />
+                  <span>Topographic</span>
+                </button>
+              </div>
+
+              {/* Detailed Provider List */}
               <div className="space-y-1">
-                {(Object.keys(TILE_CONFIG) as MapTileLayer[]).map(key => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setActiveTile(key)}
-                    className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-between border cursor-pointer ${
-                      activeTile === key 
-                        ? 'bg-[#2F5C3F] text-white border-[#203F2B]' 
-                        : 'bg-white text-[#1E2B1F] border-[#DED2AE] hover:bg-[#FBF8EF]'
-                    }`}
-                  >
-                    <span>{TILE_CONFIG[key].name}</span>
-                    {activeTile === key && <CheckCircle2 className="w-3.5 h-3.5 text-[#D9A441]" />}
-                  </button>
-                ))}
+                {(Object.keys(TILE_CONFIG) as MapTileLayer[]).map(key => {
+                  const isStreet = key === 'roadmap' || key === 'standard';
+                  const isSat = key === 'satellite' || key === 'hybrid';
+                  const isTopo = key === 'terrain' || key === 'topo';
+
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setActiveTile(key)}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between border cursor-pointer transition-colors ${
+                        activeTile === key 
+                          ? 'bg-[#2F5C3F] text-white border-[#203F2B] font-bold shadow-2xs' 
+                          : 'bg-white text-[#1E2B1F] border-[#DED2AE] hover:bg-[#FBF8EF]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {isStreet && <MapIcon className={`w-3.5 h-3.5 flex-shrink-0 ${activeTile === key ? 'text-white' : 'text-[#2F5C3F]'}`} />}
+                        {isSat && <Satellite className={`w-3.5 h-3.5 flex-shrink-0 ${activeTile === key ? 'text-white' : 'text-blue-600'}`} />}
+                        {isTopo && <Mountain className={`w-3.5 h-3.5 flex-shrink-0 ${activeTile === key ? 'text-white' : 'text-amber-700'}`} />}
+                        {key === 'dark' && <Globe className={`w-3.5 h-3.5 flex-shrink-0 ${activeTile === key ? 'text-white' : 'text-slate-700'}`} />}
+                        <span className="truncate">{TILE_CONFIG[key].name}</span>
+                      </div>
+                      {activeTile === key && <CheckCircle2 className="w-3.5 h-3.5 text-[#D9A441] flex-shrink-0 ml-1" />}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -2300,7 +2517,7 @@ export const GisMap: React.FC<GisMapProps> = ({
 
       {/* SELECTED PIG DETAIL CARD (Responsive bottom-sheet on mobile) */}
       {selectedPig && (
-        <div className="fixed inset-x-0 bottom-0 sm:absolute sm:inset-x-auto sm:bottom-6 sm:right-4 z-40 bg-[#F5EFDD]/95 backdrop-blur-md border-t sm:border border-[#DED2AE] rounded-t-3xl sm:rounded-2xl p-4 shadow-2xl w-full sm:w-96 max-h-[85vh] overflow-y-auto font-sans space-y-3 pb-safe sm:pb-4">
+        <div className="fixed inset-x-0 bottom-0 sm:absolute sm:inset-x-auto sm:bottom-6 sm:right-4 z-40 bg-[#F5EFDD]/95 backdrop-blur-md border-t sm:border border-[#DED2AE] rounded-t-3xl sm:rounded-2xl p-4 shadow-2xl w-full sm:w-96 max-h-[85vh] overflow-y-auto font-sans space-y-3 pb-safe sm:pb-4 animate-slideUp sm:animate-fadeIn">
           <div className="flex items-start justify-between gap-2 border-b border-[#DED2AE] pb-2">
             <div>
               <div className="flex items-center gap-1.5 flex-wrap">
@@ -2331,6 +2548,34 @@ export const GisMap: React.FC<GisMapProps> = ({
             </button>
           </div>
 
+          {/* Photo Thumbnail Banner if available */}
+          {selectedPig.photoUrl ? (
+            <div className="relative rounded-2xl overflow-hidden border border-[#D9A441] bg-black/80 aspect-video flex items-center justify-center group">
+              <img 
+                src={selectedPig.photoUrl} 
+                alt={`Photo for tag ${selectedPig.earTag}`} 
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+              />
+              <button
+                type="button"
+                onClick={() => setExpandedPhoto({
+                  url: selectedPig.photoUrl!,
+                  earTag: selectedPig.earTag,
+                  ownerName: selectedPig.ownerName,
+                  breed: selectedPig.breed,
+                  barangay: selectedPig.barangay
+                })}
+                className="absolute inset-0 bg-black/40 hover:bg-black/60 text-white font-bold text-xs flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              >
+                <Eye className="w-4 h-4 text-[#D9A441]" />
+                <span>Click to View Full Photo</span>
+              </button>
+              <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-xs text-[#D9A441] font-mono text-[9px] px-2 py-0.5 rounded-md border border-white/20">
+                Asset Verified
+              </div>
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="bg-white p-2 rounded-xl border border-[#DED2AE]">
               <span className="text-[10px] text-[#55604F] uppercase font-bold block">Barangay</span>
@@ -2357,6 +2602,29 @@ export const GisMap: React.FC<GisMapProps> = ({
               )}
             </div>
           </div>
+
+          {/* Contact & Physical Address Info */}
+          {(selectedPig.contact || selectedPig.address) && (
+            <div className="bg-white p-2.5 rounded-xl border border-[#DED2AE] text-xs space-y-1">
+              {selectedPig.address && (
+                <div className="text-[11px] text-[#55604F]">
+                  <b>Address:</b> {selectedPig.address}, Brgy. {selectedPig.barangay}
+                </div>
+              )}
+              {selectedPig.contact && (
+                <div className="flex items-center justify-between pt-0.5">
+                  <span className="text-[11px] text-[#55604F]"><b>Contact:</b> {selectedPig.contact}</span>
+                  <a 
+                    href={`tel:${selectedPig.contact}`}
+                    className="px-2 py-0.5 bg-[#2F5C3F] text-white text-[10px] font-bold rounded-md hover:bg-[#203F2B] flex items-center gap-1"
+                  >
+                    <Phone className="w-3 h-3 text-[#D9A441]" />
+                    <span>Call</span>
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Mortality Event Banner */}
           {selectedPig.isDeceased && (
@@ -2416,10 +2684,26 @@ export const GisMap: React.FC<GisMapProps> = ({
             <span className="text-[#1E2B1F] font-semibold">{selectedPig.lat.toFixed(5)}°, {selectedPig.lng.toFixed(5)}°</span>
           </div>
 
-          <div className="pt-1">
+          <div className="pt-1 flex gap-2">
+            {selectedPig.photoUrl && (
+              <button
+                type="button"
+                onClick={() => setExpandedPhoto({
+                  url: selectedPig.photoUrl!,
+                  earTag: selectedPig.earTag,
+                  ownerName: selectedPig.ownerName,
+                  breed: selectedPig.breed,
+                  barangay: selectedPig.barangay
+                })}
+                className="px-3 py-3 bg-[#EAE1C4] hover:bg-[#DED2AE] text-[#203F2B] font-bold rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+              >
+                <Eye className="w-4 h-4 text-[#2F5C3F]" />
+                <span>Photo</span>
+              </button>
+            )}
             <button
               onClick={() => onEditPig(selectedPig)}
-              className="w-full py-3 bg-[#2F5C3F] hover:bg-[#203F2B] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-98 transition-transform"
+              className="flex-1 py-3 bg-[#2F5C3F] hover:bg-[#203F2B] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-98 transition-transform"
             >
               <span>Edit Record</span>
             </button>
@@ -2444,6 +2728,135 @@ export const GisMap: React.FC<GisMapProps> = ({
             Clusters &amp; Colors
           </span>
         </button>
+      )}
+
+      {/* FLOATING QUICK MAP STYLE SWITCHER (Street, Satellite, Topographic) */}
+      {!selectedPig && (
+        <div className="absolute bottom-4 sm:bottom-6 right-3 sm:right-4 z-20 flex flex-col items-end">
+          {isStylePickerOpen ? (
+            <div className="bg-[#F5EFDD]/95 backdrop-blur-md border-2 border-[#D9A441] rounded-2xl shadow-2xl p-2.5 w-64 font-sans space-y-1.5 animate-fadeIn mb-1">
+              <div className="flex items-center justify-between border-b border-[#DED2AE] pb-1.5 px-1">
+                <span className="text-xs font-serif font-bold text-[#203F2B] flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-[#2F5C3F]" />
+                  Map Style View
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsStylePickerOpen(false)}
+                  className="p-1 text-[#55604F] hover:text-black rounded-lg cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* 3 Main Styles */}
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTile('roadmap');
+                  setIsStylePickerOpen(false);
+                }}
+                className={`w-full text-left p-2 rounded-xl border transition-all flex items-start gap-2.5 cursor-pointer ${
+                  activeTile === 'roadmap' || activeTile === 'standard'
+                    ? 'bg-[#2F5C3F] text-white border-[#203F2B] shadow-xs'
+                    : 'bg-white text-[#1E2B1F] border-[#DED2AE] hover:bg-[#FBF8EF]'
+                }`}
+              >
+                <div className={`p-1.5 rounded-lg ${activeTile === 'roadmap' || activeTile === 'standard' ? 'bg-white/20 text-white' : 'bg-[#F5EFDD] text-[#2F5C3F]'}`}>
+                  <MapIcon className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold flex items-center justify-between">
+                    <span>Street Map</span>
+                    {(activeTile === 'roadmap' || activeTile === 'standard') && <CheckCircle2 className="w-3.5 h-3.5 text-[#D9A441]" />}
+                  </div>
+                  <p className={`text-[10px] leading-tight mt-0.5 ${activeTile === 'roadmap' || activeTile === 'standard' ? 'text-white/80' : 'text-[#55604F]'}`}>
+                    Roads, barangay centers, puroks &amp; access paths
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTile('satellite');
+                  setIsStylePickerOpen(false);
+                }}
+                className={`w-full text-left p-2 rounded-xl border transition-all flex items-start gap-2.5 cursor-pointer ${
+                  activeTile === 'satellite' || activeTile === 'hybrid'
+                    ? 'bg-[#2F5C3F] text-white border-[#203F2B] shadow-xs'
+                    : 'bg-white text-[#1E2B1F] border-[#DED2AE] hover:bg-[#FBF8EF]'
+                }`}
+              >
+                <div className={`p-1.5 rounded-lg ${activeTile === 'satellite' || activeTile === 'hybrid' ? 'bg-white/20 text-white' : 'bg-[#F5EFDD] text-blue-700'}`}>
+                  <Satellite className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold flex items-center justify-between">
+                    <span>Satellite Aerial</span>
+                    {(activeTile === 'satellite' || activeTile === 'hybrid') && <CheckCircle2 className="w-3.5 h-3.5 text-[#D9A441]" />}
+                  </div>
+                  <p className={`text-[10px] leading-tight mt-0.5 ${activeTile === 'satellite' || activeTile === 'hybrid' ? 'text-white/80' : 'text-[#55604F]'}`}>
+                    High-res farm canopy, backyard pens &amp; vegetation
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTile('terrain');
+                  setIsStylePickerOpen(false);
+                }}
+                className={`w-full text-left p-2 rounded-xl border transition-all flex items-start gap-2.5 cursor-pointer ${
+                  activeTile === 'terrain' || activeTile === 'topo'
+                    ? 'bg-[#2F5C3F] text-white border-[#203F2B] shadow-xs'
+                    : 'bg-white text-[#1E2B1F] border-[#DED2AE] hover:bg-[#FBF8EF]'
+                }`}
+              >
+                <div className={`p-1.5 rounded-lg ${activeTile === 'terrain' || activeTile === 'topo' ? 'bg-white/20 text-white' : 'bg-[#F5EFDD] text-amber-700'}`}>
+                  <Mountain className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold flex items-center justify-between">
+                    <span>Topographic</span>
+                    {(activeTile === 'terrain' || activeTile === 'topo') && <CheckCircle2 className="w-3.5 h-3.5 text-[#D9A441]" />}
+                  </div>
+                  <p className={`text-[10px] leading-tight mt-0.5 ${activeTile === 'terrain' || activeTile === 'topo' ? 'text-white/80' : 'text-[#55604F]'}`}>
+                    Elevation contours, slopes &amp; watershed runoff
+                  </p>
+                </div>
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsStylePickerOpen(true)}
+              className="flex items-center gap-2 bg-[#203F2B]/95 hover:bg-[#2A5239] text-[#F5EFDD] border border-[#D9A441] px-3.5 py-2 rounded-2xl shadow-xl font-sans text-xs font-bold transition-all cursor-pointer backdrop-blur-md active:scale-95 group"
+              title="Switch Base Map Style: Street, Satellite, or Topographic"
+            >
+              <div className="w-5 h-5 rounded-md bg-[#D9A441]/20 flex items-center justify-center text-[#D9A441] group-hover:scale-110 transition-transform">
+                {activeTile === 'satellite' || activeTile === 'hybrid' ? (
+                  <Satellite className="w-3.5 h-3.5" />
+                ) : activeTile === 'terrain' || activeTile === 'topo' ? (
+                  <Mountain className="w-3.5 h-3.5" />
+                ) : (
+                  <MapIcon className="w-3.5 h-3.5" />
+                )}
+              </div>
+              <span className="font-serif tracking-wide text-xs">
+                {activeTile === 'satellite' || activeTile === 'hybrid'
+                  ? 'Satellite'
+                  : activeTile === 'terrain' || activeTile === 'topo'
+                  ? 'Topographic'
+                  : 'Street Map'}
+              </span>
+              <span className="text-[10px] bg-white/20 text-white/90 px-1.5 py-0.5 rounded font-mono font-normal">
+                Styles
+              </span>
+            </button>
+          )}
+        </div>
       )}
 
       {/* COMPACT SLIDE-UP BOTTOM SHEET LEGEND (TOUCH-OPTIMIZED FOR MOBILE) */}
@@ -2986,6 +3399,72 @@ export const GisMap: React.FC<GisMapProps> = ({
                 }
               }
             `}</style>
+          </div>
+        </div>
+      )}
+
+      {/* FULL RESOLUTION SWINE ASSET PHOTO LIGHTBOX MODAL */}
+      {expandedPhoto && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn"
+          onClick={() => setExpandedPhoto(null)}
+        >
+          <div 
+            className="relative max-w-2xl w-full bg-[#1E2B1F] border-2 border-[#D9A441] rounded-3xl overflow-hidden shadow-2xl space-y-0 text-white"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-3.5 bg-[#152B1D] border-b border-[#D9A441]/30">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-mono text-xs font-bold bg-[#D9A441] text-[#203F2B] px-2.5 py-0.5 rounded-lg">
+                  {expandedPhoto.earTag}
+                </span>
+                <span className="text-sm font-serif font-bold text-white">
+                  {expandedPhoto.ownerName}
+                </span>
+                {expandedPhoto.barangay && (
+                  <span className="text-xs text-white/70">
+                    · Brgy. {expandedPhoto.barangay}
+                  </span>
+                )}
+                {expandedPhoto.breed && (
+                  <span className="text-xs text-[#D9A441]/90">
+                    ({expandedPhoto.breed})
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpandedPhoto(null)}
+                className="p-1.5 hover:bg-white/20 rounded-xl text-white/80 hover:text-white transition-colors cursor-pointer"
+                aria-label="Close photo preview"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="max-h-[70vh] flex items-center justify-center bg-black/50 overflow-hidden p-2">
+              <img 
+                src={expandedPhoto.url} 
+                alt={`Swine photo for ${expandedPhoto.earTag}`}
+                className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl shadow-lg" 
+              />
+            </div>
+
+            <div className="p-3 bg-[#152B1D] border-t border-white/10 flex items-center justify-between text-xs text-white/80">
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>Verified Swine Asset Photo • Supabase Cloud Storage</span>
+              </span>
+              <a 
+                href={expandedPhoto.url} 
+                target="_blank" 
+                rel="noreferrer"
+                className="text-[#D9A441] hover:underline font-bold text-xs inline-flex items-center gap-1 cursor-pointer"
+              >
+                <span>Raw Asset</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
           </div>
         </div>
       )}

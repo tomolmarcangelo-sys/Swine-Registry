@@ -9,28 +9,6 @@ export default defineConfig(() => {
     plugins: [
       react(),
       tailwindcss(),
-      {
-        name: 'ws-safe-guard',
-        configureServer(server) {
-          if (!server.ws) {
-            server.ws = {
-              send: () => {},
-              on: () => {},
-              off: () => {},
-              close: () => {},
-              clients: new Set(),
-            } as any;
-          }
-        },
-        transform(code, id) {
-          if (id.includes('@vite/client') || id.includes('client.mjs')) {
-            return code.replace(
-              /ws\.send\(JSON\.stringify\(data\)\);/g,
-              'if (ws && typeof ws.send === "function" && ws.readyState === ws.OPEN) { ws.send(JSON.stringify(data)); }'
-            );
-          }
-        },
-      },
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],

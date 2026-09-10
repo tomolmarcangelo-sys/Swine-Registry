@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   X, 
   Check, 
@@ -18,13 +18,14 @@ import {
   Camera,
   Wifi,
   WifiOff,
-  CloudCheck
+  CloudCheck,
+  Upload
 } from 'lucide-react';
 import { BARANGAYS_DATA, BARANGAY_COORDS_MAP, BREEDS, PURPOSES } from '../data/constants';
 import { GeolocationHookReturn } from '../hooks/useGeolocation';
 import { BiosecurityAssessment, BreedType, PigRecord, PurposeType, User } from '../types';
 import { GisFormMap } from './GisFormMap';
-import { compressImageToBase64 } from '../services/imageUpload';
+import { uploadImageToSupabase } from '../services/supabaseClient';
 import { useI18n } from '../i18n/I18nContext';
 import { getSimulateOffline } from '../services/syncService';
 
@@ -92,6 +93,99 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
   const [mortalityDate, setMortalityDate] = useState(editingPig?.mortalityDate || new Date().toISOString().slice(0, 10));
   const [mortalityReason, setMortalityReason] = useState(editingPig?.mortalityReason || 'Suspected ASF Outbreak');
 
+  // Camera Access, Live Viewfinder & Capture States
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState('');
+  const [isCapturing, setIsCapturing] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const startCamera = async () => {
+    setCameraError('');
+    setIsCameraActive(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+      });
+      setCameraStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(err => console.error("Video play error", err));
+      }
+    } catch (err: any) {
+      console.error('Camera access error:', err);
+      setCameraError('Could not access device camera. Please verify camera permissions or open in a new tab.');
+      setIsCameraActive(false);
+    }
+  };
+
+  const stopCamera = useCallback(() => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    setIsCameraActive(false);
+  }, [cameraStream]);
+
+  // Handle active video source mapping when stream connects
+  useEffect(() => {
+    if (isCameraActive && cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream;
+    }
+  }, [isCameraActive, cameraStream]);
+
+  // Clean stop when modal closes or unmounts
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [cameraStream]);
+
+  const capturePhoto = () => {
+    if (!videoRef.current) return;
+    setIsCapturing(true);
+    try {
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // Draw the current video frame on the canvas
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Output a highly compressed JPEG (0.75 quality) as base64 to ensure it saves instantly and functions offline
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+        setPhotoUrl(dataUrl);
+
+        // If online, optionally fire an upload to Supabase to get a CDN url
+        if (isOnline) {
+          canvas.toBlob(async (blob) => {
+            if (blob) {
+              const file = new File([blob], `swine_capture_${Date.now()}.jpg`, { type: 'image/jpeg' });
+              try {
+                const url = await uploadImageToSupabase(file);
+                if (url) {
+                  setPhotoUrl(url);
+                }
+              } catch (uploadErr) {
+                console.warn('Silent fallback to base64, Supabase upload issue:', uploadErr);
+              }
+            }
+          }, 'image/jpeg', 0.75);
+        }
+      }
+      stopCamera();
+    } catch (err) {
+      console.error('Error capturing from video canvas:', err);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
   // Validation & masking states
   const [contactError, setContactError] = useState('');
   const [earTagError, setEarTagError] = useState('');
@@ -127,13 +221,13 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
     let formatted = val.toUpperCase().replace(/[^A-Z0-9-]/g, '');
     setEarTag(formatted);
 
-    const earTagRegex = /^HGN-[A-Z]{3,4}-\d{3,6}$/;
+    const earTagRegex = /^[A-Z]{3,4}-\d{4}-\d{1,6}$/;
     if (!formatted) {
       setEarTagError('Ear Tag / Municipal Registry ID is required');
-    } else if (!formatted.startsWith('HGN-')) {
-      setEarTagError('Ear Tag must start with "HGN-" prefix');
+    } else if (formatted.split('-').length < 3) {
+      setEarTagError('Format requires 3 parts: BRGY-YEAR-ID (e.g. POB-2026-101)');
     } else if (!earTagRegex.test(formatted)) {
-      setEarTagError('Must match Hinunangan registry format (e.g. HGN-POB-101)');
+      setEarTagError('Standard Hinunangan format required: BRGY-YEAR-ID (e.g. POB-2026-101)');
     } else {
       setEarTagError('');
     }
@@ -227,6 +321,11 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
     }
   }, [editingPig, defaultBarangay, initialCoords, isAdmin, currentUser.barangay, existingPigs]);
 
+  const handleClose = useCallback(() => {
+    stopCamera();
+    onClose();
+  }, [stopCamera, onClose]);
+
   // Lifecycle: When modal opens, initialize form state from editingPig or clean defaults
   useEffect(() => {
     if (isOpen) {
@@ -239,12 +338,12 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        handleClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, handleClose]);
 
   const handleBarangayChange = (newBrgy: string) => {
     setBarangay(newBrgy);
@@ -375,17 +474,14 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
       }
     }
 
-    // Ear tag validation (required, must start with HGN- and match format)
+    // Ear tag validation (required, must follow standard Hinunangan registration format)
     const trimmedEarTag = earTag.trim();
-    const earTagRegex = /^HGN-[A-Z]{3,4}-\d{3,6}$/;
+    const earTagRegex = /^[A-Z]{3,4}-\d{4}-\d{1,6}$/;
     if (!trimmedEarTag) {
       setEarTagError('Ear Tag / Municipal Registry ID is required');
       hasValidationError = true;
-    } else if (!trimmedEarTag.startsWith('HGN-')) {
-      setEarTagError('Ear Tag must start with "HGN-" prefix');
-      hasValidationError = true;
     } else if (!earTagRegex.test(trimmedEarTag)) {
-      setEarTagError('Must match Hinunangan registry format (e.g. HGN-POB-101)');
+      setEarTagError('Standard Hinunangan format required: BRGY-YEAR-ID (e.g. POB-2026-101)');
       hasValidationError = true;
     }
 
@@ -429,7 +525,7 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
     };
 
     onSave(record);
-    onClose();
+    handleClose();
   };
 
   if (!isOpen) return null;
@@ -439,7 +535,7 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#141A12]/60 backdrop-blur-xs overflow-y-auto animate-fadeIn"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
-          onClose();
+          handleClose();
         }
       }}
     >
@@ -457,7 +553,7 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors cursor-pointer"
             title="Close"
           >
@@ -654,7 +750,7 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
                       ? 'border-rose-300 focus:border-rose-500 text-rose-950' 
                       : 'border-[#DED2AE] focus:border-[#2F5C3F] text-[#1E2B1F]'
                   }`}
-                  placeholder="e.g. HGN-POB-101"
+                  placeholder="e.g. POB-2026-101"
                 />
                 {earTagError ? (
                   <p className="text-[11px] text-rose-600 font-medium mt-1 flex items-center gap-1">
@@ -663,62 +759,147 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
                   </p>
                 ) : (
                   <p className="text-[10px] text-[#55604F] mt-1">
-                    Format: HGN-[BRGY]-[ID] (e.g., HGN-POB-101)
+                    Format: BRGY-YEAR-ID (e.g., POB-2026-101 or ILAY-2026-005)
                   </p>
                 )}
               </div>
             </div>
 
-            {/* Swine / Pen Profile Photo Upload */}
-            <div className="mt-3 pt-3 border-t border-[#EAE1C4]">
-              <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
-                Swine / Pen Photo (Optional)
+            {/* Swine / Pen Profile Photo Upload & Direct Camera Capture */}
+            <div className="mt-3 pt-3 border-t border-[#EAE1C4] space-y-3">
+              <label className="block text-xs font-bold uppercase text-[#55604F]">
+                Swine / Pen Photo Verification (Optional)
               </label>
-              <div className="flex items-center gap-3">
-                <div className="w-14 h-14 rounded-xl border border-[#DED2AE] bg-[#FBF8EF] flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
-                  {photoUrl ? (
-                    <img src={photoUrl} alt="Swine profile" className="w-full h-full object-cover" />
-                  ) : (
-                    <Camera className="w-6 h-6 text-[#AEC0AE]" />
-                  )}
+
+              {cameraError && (
+                <div className="p-3 bg-amber-50 border border-amber-300 text-amber-950 rounded-xl text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>{cameraError}</span>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <label className="px-3 py-1.5 bg-[#2F5C3F] hover:bg-[#203F2B] text-white text-xs font-semibold rounded-lg cursor-pointer transition-colors inline-flex items-center gap-1.5">
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>{photoUrl ? 'Change Photo' : 'Upload Photo'}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            try {
-                              const base64 = await compressImageToBase64(file, 800);
-                              setPhotoUrl(base64);
-                            } catch (err) {
-                              console.error('Failed to compress image', err);
-                            }
-                          }
-                        }}
-                      />
-                    </label>
-                    {photoUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setPhotoUrl('')}
-                        className="px-2.5 py-1.5 text-xs text-rose-600 hover:text-rose-700 font-semibold cursor-pointer"
-                      >
-                        Remove
-                      </button>
+              )}
+
+              {isCameraActive ? (
+                <div className="space-y-3">
+                  {/* Live Viewfinder Box */}
+                  <div className="relative w-full max-w-md mx-auto aspect-video bg-black rounded-2xl overflow-hidden border border-[#DED2AE] shadow-inner flex items-center justify-center">
+                    <video 
+                      ref={videoRef}
+                      autoPlay 
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                    />
+                    {/* Viewfinder crosshairs and focus indicators */}
+                    <div className="absolute inset-0 border-[16px] border-black/30 pointer-events-none flex items-center justify-center">
+                      <div className="w-8 h-8 border border-white/40 rounded-lg absolute" />
+                    </div>
+                    <div className="absolute top-2 left-3 bg-rose-600 text-white font-mono text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping" />
+                      LIVE SURVEILLANCE FEED
+                    </div>
+                  </div>
+
+                  {/* Camera Control Buttons */}
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={capturePhoto}
+                      disabled={isCapturing}
+                      className="px-4 py-2 bg-[#203F2B] hover:bg-[#2F5C3F] disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {isCapturing ? (
+                        <>
+                          <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Capturing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-[#D9A441]" />
+                          <span>Capture Snapshot</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="px-4 py-2 bg-white hover:bg-[#FBF8EF] border border-[#DED2AE] text-[#55604F] text-xs font-bold rounded-xl transition-all cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 bg-[#FAF6EC] border border-[#EAE1C4] p-3.5 rounded-2xl">
+                  {/* Photo Thumbnail */}
+                  <div className="relative w-16 h-16 rounded-2xl border border-[#DED2AE] bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-3xs mx-auto sm:mx-0">
+                    {photoUrl ? (
+                      <>
+                        <img src={photoUrl} alt="Swine profile preview" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setPhotoUrl('')}
+                          className="absolute inset-0 bg-black/60 hover:bg-black/70 text-white text-[10px] font-bold flex items-center justify-center transition-opacity opacity-0 hover:opacity-100"
+                          title="Remove photo"
+                        >
+                          Remove
+                        </button>
+                      </>
+                    ) : (
+                      <Camera className="w-7 h-7 text-[#AEC0AE]" />
                     )}
                   </div>
-                  <p className="text-[10px] text-[#55604F] mt-1">
-                    Upload ear notch, pen inspection, or ear tag photo (auto-compressed for offline sync).
-                  </p>
+
+                  {/* Upload & Camera Trigger Buttons */}
+                  <div className="flex-1 space-y-1.5 text-center sm:text-left">
+                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                      {/* 1. Device Camera Trigger */}
+                      <button
+                        type="button"
+                        onClick={startCamera}
+                        className="px-3 py-1.5 bg-[#203F2B] hover:bg-[#2F5C3F] text-white text-xs font-bold rounded-xl shadow-sm transition-all active:scale-95 inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Camera className="w-3.5 h-3.5 text-[#D9A441]" />
+                        <span>Take Photo</span>
+                      </button>
+
+                      {/* 2. File Upload Selector */}
+                      <label className="px-3 py-1.5 bg-white hover:bg-[#FAF6EC] text-[#2F5C3F] border border-[#DED2AE] text-xs font-bold rounded-xl cursor-pointer transition-colors inline-flex items-center gap-1.5 shadow-2xs">
+                        <Upload className="w-3.5 h-3.5 text-[#2F5C3F]" />
+                        <span>Upload File</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const url = await uploadImageToSupabase(file);
+                                if (url) setPhotoUrl(url);
+                              } catch (err) {
+                                console.error('Failed to upload selected file', err);
+                              }
+                            }
+                          }}
+                        />
+                      </label>
+
+                      {photoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setPhotoUrl('')}
+                          className="px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-xl font-bold transition-colors cursor-pointer"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-[#55604F] leading-tight">
+                      Support verification by adding a direct swine, pen, or ear-tag photo. Supports live camera capture and gallery uploads.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
@@ -1064,7 +1245,7 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
           <div className="pt-4 border-t border-[#EAE1C4] flex items-center justify-end gap-3 sticky bottom-0 bg-white py-3">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="px-5 py-2.5 rounded-xl border border-[#DED2AE] text-[#55604F] hover:text-[#1E2B1F] text-sm font-semibold transition-colors cursor-pointer"
             >
               {t('modal.cancelBtn')}

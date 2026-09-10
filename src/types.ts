@@ -25,14 +25,20 @@ export interface BiosecurityAssessment {
 }
 
 export interface User {
+  id?: string;
   username: string;
   password?: string;
   role: Role;
   fullName: string;
   barangay: string | null;
+  assigned_barangay?: string | null;
   email?: string;
   phone?: string;
   avatarUrl?: string;
+  isActive?: boolean;
+  is_active?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface PigRecord {
@@ -62,12 +68,16 @@ export interface PigRecord {
   isDeceased?: boolean;
   mortalityDate?: string;
   mortalityReason?: string;
+  healthStatus?: 'Healthy' | 'Suspect' | 'Quarantined' | 'Deceased' | string;
+  headCount?: number;
+  biosecurityLevel?: number;
 }
 
 export interface SystemSettings {
   landingHeroTitle?: string;
   landingHeroSubtitle?: string;
   landingHeroPhotoUrl?: string;
+  logoUrl?: string;
   facebookUrl?: string;
   twitterUrl?: string;
   contactEmail?: string;
@@ -103,7 +113,21 @@ export type AppViewMode =
   | 'records' 
   | 'add' 
   | 'accounts' 
-  | 'print';
+  | 'print'
+  | 'settings';
+
+export interface AuditLogItem {
+  id: string;
+  timestamp: string;
+  username: string;
+  userFullName: string;
+  role: Role;
+  action: string;
+  details: string;
+  barangay?: string | null;
+  entityType?: 'pig' | 'user' | 'system' | 'auth';
+  ipAddress?: string;
+}
 
 export type SyncActionType = 'create' | 'update' | 'delete';
 export type SyncStatus = 'pending' | 'syncing' | 'synced' | 'conflict' | 'error';

@@ -2,7 +2,12 @@ import React, { useState } from 'react';
 import { Download, Smartphone, X, CheckCircle } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 
-export const PWAInstallButton: React.FC = () => {
+interface PWAInstallButtonProps {
+  className?: string;
+  size?: 'sm' | 'md' | 'lg' | string;
+}
+
+export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ className = '', size = 'md' }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
   const [justInstalled, setJustInstalled] = useState(false);
@@ -11,7 +16,7 @@ export const PWAInstallButton: React.FC = () => {
     return (
       <div 
         id="pwa-installed-badge"
-        className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg border border-emerald-200"
+        className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg border border-emerald-200 ${className}`}
         title="App is installed for offline field use"
       >
         <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
@@ -32,7 +37,7 @@ export const PWAInstallButton: React.FC = () => {
       <button
         id="btn-install-pwa"
         onClick={handleInstallClick}
-        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+        className={`flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer ${className}`}
         title="Install Hinunangan Swine Registry to your mobile device or computer for 100% offline access"
       >
         <Download className="w-3.5 h-3.5" />
@@ -47,7 +52,7 @@ export const PWAInstallButton: React.FC = () => {
         <button
           id="btn-install-ios-pwa"
           onClick={() => setShowIOSGuide(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-xs font-medium border border-gray-300 transition cursor-pointer"
+          className={`flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-xs font-medium border border-gray-300 transition cursor-pointer ${className}`}
         >
           <Smartphone className="w-3.5 h-3.5 text-gray-600" />
           <span>Install on iOS</span>

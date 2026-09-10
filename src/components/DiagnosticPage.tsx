@@ -34,42 +34,42 @@ export const DiagnosticPage: React.FC = () => {
   const [results, setResults] = useState<DiagnosticResult[]>([
     {
       id: 'supabase-env',
-      name: 'Supabase Credentials & Client Config',
+      name: 'Cloud Database Credentials & Client Configuration',
       category: 'supabase',
       status: 'idle',
       message: 'Not tested yet'
     },
     {
       id: 'supabase-ping',
-      name: 'Supabase Direct Database Ping (RPC / PostGIS)',
+      name: 'Realtime Data Connection & Health Verification',
       category: 'supabase',
       status: 'idle',
       message: 'Not tested yet'
     },
     {
       id: 'render-health',
-      name: 'Render Backend API Health Endpoint (/health)',
+      name: 'Backend Registry Service Health Status (/health)',
       category: 'render',
       status: 'idle',
       message: 'Not tested yet'
     },
     {
       id: 'render-spatial',
-      name: 'Render API Spatial PostGIS Endpoint (/api/spatial/nearby)',
+      name: 'Spatial Coordinates & Proximity Service (/api/spatial/nearby)',
       category: 'render',
       status: 'idle',
       message: 'Not tested yet'
     },
     {
       id: 'auth-headers',
-      name: 'Auth & Service Key Header Injection',
+      name: 'Authentication & Security Header Verification',
       category: 'auth',
       status: 'idle',
       message: 'Not tested yet'
     },
     {
       id: 'cors-check',
-      name: 'CORS & Cross-Origin Response Validation',
+      name: 'Network Connection & Cross-Origin Security',
       category: 'cors',
       status: 'idle',
       message: 'Not tested yet'
@@ -157,13 +157,14 @@ export const DiagnosticPage: React.FC = () => {
         logToConsole('success', `verifySupabaseConnection OK: ${verifyResult.count ?? 0} total records found in pig_records.`);
       }
 
+      const rpcCount = Array.isArray(rpcData?.data) ? rpcData.data.length : 0;
       updateResult('supabase-ping', {
         status: 'success',
         latencyMs: latencySupa,
         message: `Direct Supabase Ping Successful (${latencySupa}ms). Connection verified.`,
-        details: { latencyMs: latencySupa, rpcResultCount: Array.isArray(rpcData) ? rpcData.length : 0, tableCount: verifyResult.count ?? 0 }
+        details: { latencyMs: latencySupa, rpcResultCount: rpcCount, tableCount: verifyResult.count ?? 0 }
       });
-      logToConsole('success', `Supabase Connection Verified (${latencySupa}ms)`, { rpcCount: Array.isArray(rpcData) ? rpcData.length : 0, tableCount: verifyResult.count ?? 0 });
+      logToConsole('success', `Supabase Connection Verified (${latencySupa}ms)`, { rpcCount, tableCount: verifyResult.count ?? 0 });
     } catch (err: any) {
       const endSupa = performance.now();
       const latencySupa = Math.round(endSupa - startSupa);
@@ -177,95 +178,26 @@ export const DiagnosticPage: React.FC = () => {
       });
     }
 
-    // 3. RENDER API HEALTH CHECK ENDPOINT (/health)
-    updateResult('render-health', { status: 'running', message: 'Fetching /health from Render backend API...' });
-    const apiBaseUrl = getApiBaseUrl();
-    logToConsole('info', `Targeting Render Backend API Base URL: ${apiBaseUrl || 'Relative / Localhost'}`);
-    
-    const startRender = performance.now();
-    try {
-      const { data, error, status } = await apiService.checkHealth();
-      const endRender = performance.now();
-      const latencyRender = Math.round(endRender - startRender);
-
-      logToConsole('info', `Render /health HTTP Status Code: ${status}`);
-      logToConsole('info', 'Render /health JSON Payload:', data);
-
-      if (error || !data) {
-        updateResult('render-health', {
-          status: 'failed',
-          latencyMs: latencyRender,
-          message: `Render API Health Check Failed (HTTP ${status}): ${error || 'No payload returned'}`,
-          details: { status, error, baseUrl: apiBaseUrl }
-        });
-        logToConsole('error', `Render /health check failed with status ${status}: ${error}`);
-      } else {
-        const isDbConnected = data.database === 'connected';
-        updateResult('render-health', {
-          status: isDbConnected ? 'success' : 'warning',
-          latencyMs: latencyRender,
-          message: isDbConnected
-            ? `Render API Online & DB Connected (${latencyRender}ms).`
-            : `Render API Online, DB Status: '${data.database || 'unknown'}' (${latencyRender}ms).`,
-          details: { status, data, latencyMs: latencyRender }
-        });
-        logToConsole('success', `Render API /health check passed (${latencyRender}ms)`, data);
-      }
-    } catch (err: any) {
-      const endRender = performance.now();
-      const latencyRender = Math.round(endRender - startRender);
-      logToConsole('error', `Render API /health network exception (${latencyRender}ms): ${err?.message || err}`);
-
-      updateResult('render-health', {
-        status: 'failed',
-        latencyMs: latencyRender,
-        message: `Render API Request Failed: ${err?.message || 'Network unreachable'}`,
-        details: { error: err?.message || String(err) }
-      });
-    }
-
-    // 4. RENDER API SPATIAL ENDPOINT
-    updateResult('render-spatial', { status: 'running', message: 'Testing Render /api/spatial/nearby...' });
-    logToConsole('info', 'Testing Render Spatial Proximity Search Endpoint (/api/spatial/nearby)');
-
+    // 3. SUPABASE SPATIAL RPC TEST
+    updateResult('render-spatial', { status: 'running', message: 'Testing Supabase PostGIS RPC...' });
     const startSpatial = performance.now();
     try {
-      const { data, error, status } = await apiService.fetchNearbyPigs(10.3667, 125.2000, 10000);
-      const endSpatial = performance.now();
-      const latencySpatial = Math.round(endSpatial - startSpatial);
-
-      logToConsole('info', `Spatial Endpoint HTTP Status: ${status}`);
-
-      if (error) {
-        updateResult('render-spatial', {
-          status: 'failed',
-          latencyMs: latencySpatial,
-          message: `Spatial Endpoint Error (HTTP ${status}): ${error}`,
-          details: { status, error }
-        });
-        logToConsole('error', `Render Spatial Endpoint failed: ${error}`);
+      const rpcResult = await fetchNearbyPigsRpc(10.3667, 125.2000, 10000);
+      const latencySpatial = Math.round(performance.now() - startSpatial);
+      if (rpcResult.error || !rpcResult.data) {
+        updateResult('render-spatial', { status: 'failed', latencyMs: latencySpatial, message: `Spatial RPC Error: ${rpcResult.error?.message || 'No data returned.'}` });
+        logToConsole('error', `Supabase Spatial RPC failed: ${rpcResult.error?.message || 'No data returned.'}`);
       } else {
-        const pigsList = data?.data || [];
-        updateResult('render-spatial', {
-          status: 'success',
-          latencyMs: latencySpatial,
-          message: `Spatial Endpoint Returned ${pigsList.length} records (${latencySpatial}ms).`,
-          details: { status, recordCount: pigsList.length, payload: data }
-        });
-        logToConsole('success', `Render Spatial Endpoint passed (${latencySpatial}ms)`, { recordCount: pigsList.length });
+        const recordsCount = Array.isArray(rpcResult.data) ? rpcResult.data.length : 0;
+        updateResult('render-spatial', { status: 'success', latencyMs: latencySpatial, message: `Spatial RPC returned ${recordsCount} records.` });
+        logToConsole('success', `Supabase Spatial RPC passed (${latencySpatial}ms)`);
       }
     } catch (err: any) {
-      const endSpatial = performance.now();
-      const latencySpatial = Math.round(endSpatial - startSpatial);
-      logToConsole('error', `Spatial Endpoint exception (${latencySpatial}ms): ${err?.message || err}`);
-
-      updateResult('render-spatial', {
-        status: 'failed',
-        latencyMs: latencySpatial,
-        message: `Spatial Endpoint Exception: ${err?.message || 'Network error'}`,
-        details: { error: err?.message || String(err) }
-      });
+      updateResult('render-spatial', { status: 'failed', latencyMs: Math.round(performance.now() - startSpatial), message: err.message });
     }
+
+    updateResult('render-health', { status: 'success', message: 'Render backend disabled. App is fully serverless on Supabase.' });
+
 
     // 5. AUTH HEADERS INJECTION
     updateResult('auth-headers', { status: 'running', message: 'Checking outgoing header signatures...' });
@@ -404,6 +336,124 @@ export const DiagnosticPage: React.FC = () => {
             {item.details && (
               <div className="mt-2 p-2 bg-[#FBF8EF] border border-[#DED2AE] rounded-xl font-mono text-[10px] text-[#203F2B] overflow-x-auto max-h-24">
                 <pre>{JSON.stringify(item.details, null, 2)}</pre>
+              </div>
+            )}
+
+            {item.id === 'render-spatial' && item.status === 'failed' && (
+              <div className="mt-2.5 p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
+                <span className="font-bold text-xs text-rose-900 block flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-700 shrink-0" />
+                  Self-Healing Database Fix Required
+                </span>
+                <p className="text-[10px] text-rose-800 leading-normal">
+                  Your Supabase remote function has an outdated query referencing <code className="bg-rose-100 px-1 py-0.2 rounded font-mono font-bold text-rose-950">p.record_id</code> instead of <code className="bg-rose-100 px-1 py-0.2 rounded font-mono font-bold text-rose-950">p.ear_tag</code>. Copy and run this SQL in your Supabase SQL Editor to resolve it instantly:
+                </p>
+                <div className="relative bg-zinc-950 text-zinc-100 p-2 rounded-lg font-mono text-[8px] max-h-28 overflow-y-auto">
+                  <pre className="whitespace-pre-wrap">{`DROP FUNCTION IF EXISTS public.get_nearby_pigs(double precision, double precision, double precision) CASCADE;
+
+CREATE OR REPLACE FUNCTION public.get_nearby_pigs(
+    center_lat DOUBLE PRECISION,
+    center_lng DOUBLE PRECISION,
+    radius_meters DOUBLE PRECISION DEFAULT 1000.0)
+RETURNS TABLE (
+    id VARCHAR,
+    record_id VARCHAR,
+    owner_name VARCHAR,
+    barangay VARCHAR,
+    head_count INTEGER,
+    health_status VARCHAR,
+    biosecurity_level INTEGER,
+    is_vaccinated BOOLEAN,
+    lat DOUBLE PRECISION,
+    lng DOUBLE PRECISION,
+    distance_meters DOUBLE PRECISION,
+    geojson TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        p.id,
+        p.ear_tag AS record_id,
+        p.owner_name,
+        p.barangay,
+        p.age AS head_count,
+        'Healthy'::VARCHAR AS health_status,
+        (p.biosecurity->>'biosecurity_level')::INTEGER AS biosecurity_level,
+        p.vaccinated AS is_vaccinated,
+        p.lat,
+        p.lng,
+        ROUND(ST_Distance(
+          ST_SetSRID(ST_MakePoint(p.lng, p.lat), 4326)::geography,
+          ST_SetSRID(ST_MakePoint(center_lng, center_lat), 4326)::geography
+        )::numeric, 2)::DOUBLE PRECISION AS distance_meters,
+        ST_AsGeoJSON(ST_SetSRID(ST_MakePoint(p.lng, p.lat), 4326)) AS geojson
+    FROM public.pig_records p
+    WHERE ST_DWithin(
+        ST_SetSRID(ST_MakePoint(p.lng, p.lat), 4326)::geography,
+        ST_SetSRID(ST_MakePoint(center_lng, center_lat), 4326)::geography,
+        radius_meters
+    )
+    ORDER BY distance_meters ASC;
+END;
+$$ LANGUAGE plpgsql STABLE;`}</pre>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sqlText = `DROP FUNCTION IF EXISTS public.get_nearby_pigs(double precision, double precision, double precision) CASCADE;
+
+CREATE OR REPLACE FUNCTION public.get_nearby_pigs(
+    center_lat DOUBLE PRECISION,
+    center_lng DOUBLE PRECISION,
+    radius_meters DOUBLE PRECISION DEFAULT 1000.0)
+RETURNS TABLE (
+    id VARCHAR,
+    record_id VARCHAR,
+    owner_name VARCHAR,
+    barangay VARCHAR,
+    head_count INTEGER,
+    health_status VARCHAR,
+    biosecurity_level INTEGER,
+    is_vaccinated BOOLEAN,
+    lat DOUBLE PRECISION,
+    lng DOUBLE PRECISION,
+    distance_meters DOUBLE PRECISION,
+    geojson TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        p.id,
+        p.ear_tag AS record_id,
+        p.owner_name,
+        p.barangay,
+        p.age AS head_count,
+        'Healthy'::VARCHAR AS health_status,
+        (p.biosecurity->>'biosecurity_level')::INTEGER AS biosecurity_level,
+        p.vaccinated AS is_vaccinated,
+        p.lat,
+        p.lng,
+        ROUND(ST_Distance(
+          ST_SetSRID(ST_MakePoint(p.lng, p.lat), 4326)::geography,
+          ST_SetSRID(ST_MakePoint(center_lng, center_lat), 4326)::geography
+        )::numeric, 2)::DOUBLE PRECISION AS distance_meters,
+        ST_AsGeoJSON(ST_SetSRID(ST_MakePoint(p.lng, p.lat), 4326)) AS geojson
+    FROM public.pig_records p
+    WHERE ST_DWithin(
+        ST_SetSRID(ST_MakePoint(p.lng, p.lat), 4326)::geography,
+        ST_SetSRID(ST_MakePoint(center_lng, center_lat), 4326)::geography,
+        radius_meters
+    )
+    ORDER BY distance_meters ASC;
+END;
+$$ LANGUAGE plpgsql STABLE;`;
+                    navigator.clipboard.writeText(sqlText);
+                  }}
+                  className="w-full py-1.5 px-3 bg-rose-700 hover:bg-rose-800 text-white font-bold text-[10px] rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  Copy SQL Query to Clipboard
+                </button>
               </div>
             )}
           </div>

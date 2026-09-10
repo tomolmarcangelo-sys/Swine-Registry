@@ -1,7 +1,7 @@
 {
-  "name": "Hinunangan DA Swine Registry",
+  "name": "Hinunangan DA Swine Registry & GIS Platform",
   "description": "Municipal Agriculture Office swine registration, herd health monitoring, and livestock records management for Hinunangan's 40 barangays.",
-  "requestFramePermissions": ["geolocation"],
+  "requestFramePermissions": ["geolocation", "camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
 

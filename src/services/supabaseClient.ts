@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from './supabase';
-import { PigRecord, User } from '../types';
+import { PigRecord, User, AuditLogItem } from '../types';
 
 // Export functions for checking configuration and accessing single client instance
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) || '';
@@ -43,6 +43,13 @@ export function pigToRow(pig: PigRecord) {
     registered_by: pig.registeredBy,
     notes: pig.notes,
     biosecurity: pig.biosecurity,
+    photo_url: pig.photoUrl || null,
+    health_status: pig.healthStatus || (pig.isDeceased ? 'Deceased' : (pig.asfCleared ? 'Healthy' : 'Suspect')),
+    is_deceased: pig.isDeceased ?? false,
+    mortality_date: pig.mortalityDate || null,
+    mortality_reason: pig.mortalityReason || null,
+    head_count: pig.headCount || 1,
+    biosecurity_level: pig.biosecurityLevel || (pig.biosecurity ? Object.values(pig.biosecurity).filter(Boolean).length : 1),
     updated_at: new Date().toISOString()
   };
 }
@@ -63,6 +70,9 @@ export function rowToPig(row: any): PigRecord {
     }
   }
 
+  const isDeceased = Boolean(row.is_deceased ?? row.isDeceased ?? (row.health_status === 'Deceased'));
+  const healthStatus = row.health_status ?? row.healthStatus ?? (isDeceased ? 'Deceased' : (row.asf_cleared ? 'Healthy' : 'Suspect'));
+
   return {
     id: String(row.id),
     earTag: row.ear_tag ?? row.earTag ?? '',
@@ -70,7 +80,7 @@ export function rowToPig(row: any): PigRecord {
     contact: row.contact ?? '',
     address: row.address ?? '',
     barangay: row.barangay ?? 'Poblacion 1',
-    breed: row.breed ?? 'Landrace',
+    breed: row.breed ?? 'Native / Native-cross',
     sex: row.sex ?? 'Female',
     age: Number(row.age) || 6,
     weight: Number(row.weight) || 75,
@@ -85,32 +95,52 @@ export function rowToPig(row: any): PigRecord {
     gpsTimestamp: row.gps_timestamp ?? row.gpsTimestamp,
     registeredBy: row.registered_by ?? row.registeredBy ?? 'focal_person',
     notes: row.notes ?? '',
-    biosecurity: row.biosecurity
+    biosecurity: row.biosecurity,
+    photoUrl: row.photo_url ?? row.photoUrl ?? '',
+    healthStatus,
+    isDeceased,
+    mortalityDate: row.mortality_date ?? row.mortalityDate,
+    mortalityReason: row.mortality_reason ?? row.mortalityReason,
+    headCount: Number(row.head_count ?? row.headCount ?? 1),
+    biosecurityLevel: Number(row.biosecurity_level ?? row.biosecurityLevel ?? 1)
   };
 }
 
 export function userToRow(user: User) {
   return {
+    id: user.id,
     username: user.username.toLowerCase(),
     password: user.password,
+    password_hash: user.password,
     role: user.role,
     full_name: user.fullName,
     barangay: user.barangay,
+    assigned_barangay: user.barangay,
+    is_active: user.isActive !== undefined ? user.isActive : (user.is_active !== undefined ? user.is_active : true),
     email: user.email,
     phone: user.phone,
+    avatar_url: user.avatarUrl,
     updated_at: new Date().toISOString()
   };
 }
 
 export function rowToUser(row: any): User {
+  const isUserActive = row.is_active !== undefined ? Boolean(row.is_active) : (row.isActive !== undefined ? Boolean(row.isActive) : true);
   return {
+    id: row.id ? String(row.id) : undefined,
     username: row.username,
-    password: row.password || '',
+    password: row.password_hash || row.password || '',
     role: row.role || 'user',
     fullName: row.full_name || row.fullName || row.username,
-    barangay: row.barangay || null,
+    barangay: row.assigned_barangay || row.barangay || null,
+    assigned_barangay: row.assigned_barangay || row.barangay || null,
+    isActive: isUserActive,
+    is_active: isUserActive,
     email: row.email,
-    phone: row.phone
+    phone: row.phone,
+    avatarUrl: row.avatar_url || row.avatarUrl,
+    createdAt: row.created_at || row.createdAt,
+    updatedAt: row.updated_at || row.updatedAt
   };
 }
 
@@ -282,83 +312,8 @@ export async function deletePigFromSupabase(pigId: string): Promise<void> {
   try {
     const { error } = await client.from('pig_records').delete().eq('id', pigId);
     if (error) throw error;
-  } catch (err) {
-    console.error('Error deleting pig from Supabase:', err);
-    throw err;
-  }
-}
-
-/**
- * Fetch all users from Supabase
- */
-export async function fetchUsersFromSupabase(): Promise<User[]> {
-  const client = getSupabaseClient();
-  if (!client) return [];
-
-  try {
-    const { data, error } = await client.from('users').select('*');
-    if (error) {
-      console.warn('[Supabase] fetchUsers error:', error.message);
-      return [];
-    }
-    return (data || []).map(rowToUser);
-  } catch (err) {
-    console.error('Error fetching users from Supabase:', err);
-    return [];
-  }
-}
-
-/**
- * Save user to Supabase
- */
-export async function saveUserToSupabase(user: User): Promise<void> {
-  const client = getSupabaseClient();
-  if (!client) return;
-
-  try {
-    const row = userToRow(user);
-    await safeUpsertUserRows(client, [row]);
   } catch (err: any) {
-    console.warn('saveUserToSupabase notice:', err?.message || err);
-  }
-}
-
-/**
- * Batch write users to Supabase
- */
-export async function batchSaveUsersToSupabase(users: User[]): Promise<number> {
-  if (users.length === 0) return 0;
-  const client = getSupabaseClient();
-  if (!client) return 0;
-
-  try {
-    const rows = users.map(userToRow);
-    await safeUpsertUserRows(client, rows);
-    return users.length;
-  } catch (err: any) {
-    console.warn('batchSaveUsersToSupabase notice:', err?.message || err);
-    return 0;
-  }
-}
-
-/**
- * Spatial helper: invoke get_nearby_pigs RPC
- */
-export async function fetchNearbyPigsRpc(lat: number, lng: number, radiusMeters: number = 1500) {
-  const client = getSupabaseClient();
-  if (!client) return null;
-
-  try {
-    const { data, error } = await client.rpc('get_nearby_pigs', {
-      center_lat: lat,
-      center_lng: lng,
-      radius_meters: radiusMeters,
-    });
-    if (error) throw error;
-    return data;
-  } catch (err) {
-    console.warn('[Supabase Spatial RPC Error]', err);
-    return null;
+    console.warn('deletePigFromSupabase notice:', err?.message || err);
   }
 }
 
@@ -481,8 +436,16 @@ export function subscribeToPigRecordUpdates(onUpdate: (pigs: PigRecord[]) => voi
   const client = getSupabaseClient();
   if (!client) return () => {};
 
+  const channelTopic = 'public:pig_records_changes';
+
+  // Remove any existing channel with the same topic to avoid "cannot add callbacks after subscribe" error
+  const existingChannel = client.getChannels().find(c => c.topic === `realtime:${channelTopic}` || c.topic === channelTopic);
+  if (existingChannel) {
+    client.removeChannel(existingChannel);
+  }
+
   const channel = client
-    .channel('public:pig_records_changes')
+    .channel(channelTopic)
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'pig_records' },
@@ -498,4 +461,173 @@ export function subscribeToPigRecordUpdates(onUpdate: (pigs: PigRecord[]) => voi
   return () => {
     client.removeChannel(channel);
   };
+}
+
+/**
+ * Realtime listener for live system audit logs synchronization using Supabase Realtime Channels
+ */
+export function subscribeToAuditLogUpdates(onInsert: (log: AuditLogItem) => void) {
+  const client = getSupabaseClient();
+  if (!client) return () => {};
+
+  const channelTopic = 'public:audit_logs_changes';
+
+  // Remove any existing channel with the same topic to avoid "cannot add callbacks after subscribe" error
+  const existingChannel = client.getChannels().find(c => c.topic === `realtime:${channelTopic}` || c.topic === channelTopic);
+  if (existingChannel) {
+    client.removeChannel(existingChannel);
+  }
+
+  const channel = client
+    .channel(channelTopic)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'audit_logs' },
+      (payload) => {
+        const row = payload.new;
+        const mappedLog: AuditLogItem = {
+          id: row.id,
+          timestamp: row.timestamp || new Date().toISOString(),
+          username: row.username,
+          userFullName: row.user_full_name || 'System User',
+          role: row.role || 'user',
+          action: row.action,
+          details: row.details || '',
+          barangay: row.barangay || null,
+          entityType: row.entity_type || 'system',
+          ipAddress: row.ip_address || '127.0.0.1'
+        };
+        onInsert(mappedLog);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    client.removeChannel(channel);
+  };
+}
+
+/**
+ * Uploads an image file to Supabase storage
+ */
+export async function uploadImageToSupabase(file: File, bucket: string = 'registry_images'): Promise<string | null> {
+  const client = getSupabaseClient();
+  if (!client) {
+    console.warn('[uploadImageToSupabase] Supabase client unavailable.');
+    return null;
+  }
+
+  try {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+    const filePath = `${fileName}`;
+
+    const { data, error } = await client.storage
+      .from(bucket)
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (error) {
+      console.error('[uploadImageToSupabase] Upload failed:', error.message);
+      return null;
+    }
+
+    const { data: publicUrlData } = client.storage
+      .from(bucket)
+      .getPublicUrl(filePath);
+
+    return publicUrlData.publicUrl;
+  } catch (err) {
+    console.error('[uploadImageToSupabase] Upload exception:', err);
+    return null;
+  }
+}
+
+export async function fetchNearbyPigsRpc(lat: number, lng: number, radiusMeters: number = 1500): Promise<{ data: any, error: any }> {
+  const client = getSupabaseClient();
+  if (!client) return { data: null, error: new Error('Supabase client unavailable') };
+
+  try {
+    const { data, error } = await client.rpc('get_nearby_pigs', {
+      center_lat: lat,
+      center_lng: lng,
+      radius_meters: radiusMeters,
+    });
+    return { data, error };
+  } catch (err) {
+    console.warn('[Supabase Spatial RPC Error]', err);
+    return { data: null, error: err };
+  }
+}
+
+export async function fetchUsersFromSupabase(): Promise<User[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+  try {
+    const { data, error } = await client.from('users').select('*').order('full_name', { ascending: true });
+    if (error) {
+      console.warn('[Supabase] fetchUsers error:', error.message);
+      return [];
+    }
+    return (data || []).map(rowToUser);
+  } catch (err) {
+    console.error('Error fetching users from Supabase:', err);
+    return [];
+  }
+}
+
+export async function saveUserToSupabase(user: User): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) return;
+  try {
+    const row = userToRow(user);
+    await safeUpsertUserRows(client, [row]);
+  } catch (err: any) {
+    console.warn('saveUserToSupabase notice:', err?.message || err);
+  }
+}
+
+export async function updateUserInSupabase(user: User): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) return;
+  try {
+    const row = userToRow(user);
+    const { error } = await client
+      .from('users')
+      .update(row)
+      .eq('username', user.username.toLowerCase());
+    if (error) throw error;
+  } catch (err: any) {
+    console.warn('updateUserInSupabase notice:', err?.message || err);
+  }
+}
+
+export async function deleteUserFromSupabase(username: string): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) return;
+  try {
+    const { error } = await client
+      .from('users')
+      .delete()
+      .eq('username', username.toLowerCase());
+    if (error) throw error;
+  } catch (err: any) {
+    console.warn('deleteUserFromSupabase notice:', err?.message || err);
+  }
+}
+
+export async function batchSaveUsersToSupabase(users: User[]): Promise<number> {
+  if (users.length === 0) return 0;
+  const client = getSupabaseClient();
+  if (!client) return 0;
+  try {
+    const rows = users.map(userToRow);
+    await safeUpsertUserRows(client, rows);
+    return users.length;
+  } catch (err: any) {
+    console.warn('batchSaveUsersToSupabase notice:', err?.message || err);
+    return 0;
+  }
 }

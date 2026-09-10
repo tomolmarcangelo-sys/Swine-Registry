@@ -1,10 +1,130 @@
 import { DEFAULT_USERS } from '../data/constants';
-import { PigRecord, User } from '../types';
+import { PigRecord, User, AuditLogItem } from '../types';
 import { savePigsToIdb, loadPigsFromIdb } from './indexedDbService';
 
 const STORAGE_USERS = 'hinunangan_da_users_v4';
 const STORAGE_PIGS = 'hinunangan_da_pigs_v4';
 const STORAGE_CURRENT_USER = 'hinunangan_da_auth_v4';
+const STORAGE_AUDIT_LOGS = 'hinunangan_da_audit_logs_v4';
+
+export function loadStoredAuditLogs(): AuditLogItem[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_AUDIT_LOGS);
+    if (!raw) {
+      // Seed initial demo audit logs representing activity across accounts and admin
+      const initialLogs: AuditLogItem[] = [
+        {
+          id: 'log-1',
+          timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
+          username: 'admin',
+          userFullName: 'Municipal Agriculturist Office',
+          role: 'admin',
+          action: 'SYSTEM_STARTUP',
+          details: 'Initialized Hinunangan DA Swine Registry & Biosecurity System',
+          barangay: null,
+          entityType: 'system'
+        },
+        {
+          id: 'log-2',
+          timestamp: new Date(Date.now() - 3600000 * 12).toISOString(),
+          username: 'admin',
+          userFullName: 'Municipal Agriculturist Office',
+          role: 'admin',
+          action: 'CREATE_ACCOUNT',
+          details: 'Created focal person account for Barangay Poblacion (poblacion.brgy)',
+          barangay: 'Poblacion',
+          entityType: 'user'
+        },
+        {
+          id: 'log-3',
+          timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
+          username: 'poblacion.brgy',
+          userFullName: 'Maria Elena Santos',
+          role: 'user',
+          action: 'REGISTER_PIG',
+          details: 'Registered swine tag HIN-POB-2026-001 (Duroc, 45kg) in Brgy. Poblacion',
+          barangay: 'Poblacion',
+          entityType: 'pig'
+        },
+        {
+          id: 'log-4',
+          timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+          username: 'nava.brgy',
+          userFullName: 'Ariel Tocmo',
+          role: 'user',
+          action: 'UPDATE_BIOSECURITY',
+          details: 'Submitted biosecurity compliance inspection for Brgy. Nava',
+          barangay: 'Nava',
+          entityType: 'pig'
+        }
+      ];
+      localStorage.setItem(STORAGE_AUDIT_LOGS, JSON.stringify(initialLogs));
+      return initialLogs;
+    }
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+export async function loadAuditLogsFromDb(barangayScope?: string | null): Promise<AuditLogItem[]> {
+  try {
+    const url = barangayScope 
+      ? `/api/audit-logs?barangay=${encodeURIComponent(barangayScope)}` 
+      : '/api/audit-logs';
+    const res = await fetch(url);
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+      return json.data;
+    }
+  } catch (err) {
+    console.warn('Failed to load audit logs from database, falling back to local storage', err);
+  }
+  return loadStoredAuditLogs();
+}
+
+export function logSystemAction(
+  user: User | null,
+  action: string,
+  details: string,
+  entityType: 'pig' | 'user' | 'system' | 'auth' = 'system',
+  barangayOverride?: string | null
+): AuditLogItem {
+  // Infer barangay: priority to override, then user's assigned barangay, then check details
+  let targetBarangay: string | null = barangayOverride !== undefined 
+    ? barangayOverride 
+    : (user ? user.barangay : null);
+
+  const newItem: AuditLogItem = {
+    id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    username: user ? user.username : 'system',
+    userFullName: user ? user.fullName : 'System Automatic',
+    role: user ? user.role : 'admin',
+    action,
+    details,
+    entityType,
+    barangay: targetBarangay,
+    ipAddress: '192.168.1.' + Math.floor(Math.random() * 80 + 10)
+  };
+
+  try {
+    const existing = loadStoredAuditLogs();
+    const updated = [newItem, ...existing].slice(0, 500); // keep last 500 logs
+    localStorage.setItem(STORAGE_AUDIT_LOGS, JSON.stringify(updated));
+
+    // Also sync to backend database API
+    fetch('/api/audit-logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newItem)
+    }).catch(err => console.warn('Background audit log db sync notice:', err));
+  } catch (err) {
+    console.error('Failed to record audit log', err);
+  }
+
+  return newItem;
+}
 
 export function loadStoredUsers(): User[] {
   try {

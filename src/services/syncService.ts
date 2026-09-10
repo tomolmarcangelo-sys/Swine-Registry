@@ -225,13 +225,17 @@ export interface SyncProcessResult {
  */
 export async function syncWithSupabase(): Promise<{ pigs: PigRecord[]; users: User[] }> {
   try {
+    // 1. Process outbound offline queue first to ensure pending creations are pushed
+    await processSyncQueue();
+
+    // 2. Fetch authoritative state from Supabase
     let cloudPigs = await fetchPigsFromSupabase();
     let cloudUsers = await fetchUsersFromSupabase();
 
     let localPigs = loadStoredPigs();
     let localUsers = loadStoredUsers();
 
-    // If Cloud is empty on first boot, seed Cloud from initial local database
+    // If Cloud is completely empty on first boot, and we have local data, seed it (fallback)
     if (cloudPigs.length === 0 && localPigs.length > 0) {
       await batchSavePigsToSupabase(localPigs);
       cloudPigs = localPigs;
@@ -242,27 +246,33 @@ export async function syncWithSupabase(): Promise<{ pigs: PigRecord[]; users: Us
       cloudUsers = localUsers;
     }
 
-    // Merge Cloud data into local storage (Cloud authoritative)
-    if (cloudPigs.length > 0) {
-      const pigMap = new Map<string, PigRecord>();
-      localPigs.forEach(p => pigMap.set(p.id, p));
-      cloudPigs.forEach(p => pigMap.set(p.id, p));
-      localPigs = Array.from(pigMap.values());
-      saveStoredPigs(localPigs);
-    }
+    // 3. Reconcile Cloud authoritative data with any remaining offline/pending records
+    const queue = loadSyncQueue();
+    const pendingPigs = new Set(queue.filter(q => q.entityType === 'pig' && (q.status === 'pending' || q.status === 'error') && q.action !== 'delete').map(q => q.recordId));
+    const pendingUsers = new Set(queue.filter(q => q.entityType === 'user' && (q.status === 'pending' || q.status === 'error') && q.action !== 'delete').map(q => q.recordId));
 
-    if (cloudUsers.length > 0) {
-      const userMap = new Map<string, User>();
-      localUsers.forEach(u => userMap.set(u.username.toLowerCase(), u));
-      cloudUsers.forEach(u => userMap.set(u.username.toLowerCase(), u));
-      localUsers = Array.from(userMap.values());
-      saveStoredUsers(localUsers);
-    }
+    const finalPigs = [...cloudPigs];
+    localPigs.forEach(p => {
+       if (pendingPigs.has(p.id) && !finalPigs.find(cp => cp.id === p.id)) {
+           finalPigs.push(p);
+       }
+    });
+
+    const finalUsers = [...cloudUsers];
+    localUsers.forEach(u => {
+       if (pendingUsers.has(u.username) && !finalUsers.find(cu => cu.username === u.username)) {
+           finalUsers.push(u);
+       }
+    });
+
+    // Hard replace local storage to eliminate "ghost" records that were deleted remotely
+    saveStoredPigs(finalPigs);
+    saveStoredUsers(finalUsers);
 
     localStorage.setItem(STORAGE_CLOUD_INITIALIZED, 'true');
     setLastSyncTime(new Date().toISOString());
 
-    return { pigs: localPigs, users: localUsers };
+    return { pigs: finalPigs, users: finalUsers };
   } catch (err) {
     console.warn('Supabase sync fallback to local storage:', err);
     return { pigs: loadStoredPigs(), users: loadStoredUsers() };

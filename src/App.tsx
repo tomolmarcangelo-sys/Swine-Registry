@@ -19,9 +19,10 @@ import {
   RefreshCw,
   Clock,
   CloudCheck,
-  ChevronDown
+  ChevronDown,
+  Settings as SettingsIcon
 } from 'lucide-react';
-import { loadStoredAuth, loadStoredPigs, loadStoredUsers, saveStoredAuth, saveStoredPigs, saveStoredUsers } from './services/storage';
+import { loadStoredAuth, loadStoredPigs, loadStoredUsers, saveStoredAuth, saveStoredPigs, saveStoredUsers, logSystemAction } from './services/storage';
 import { AppViewMode, PigRecord, User } from './types';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useOfflineSync } from './hooks/useOfflineSync';
@@ -44,9 +45,12 @@ import { AccountsView } from './components/AccountsView';
 import { PrintReportsView } from './components/PrintReportsView';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { OfflineSyncModal } from './components/OfflineSyncModal';
+import { BiosecurityChecklistModal } from './components/BiosecurityChecklistModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import ToastContainer from './components/ToastContainer';
 import { LanguageToggle } from './components/LanguageToggle';
+import { UserSettingsView, triggerUnifiedAlert } from './components/UserSettingsView';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { SystemSettings } from './types';
 
 export default function App() {
@@ -66,6 +70,7 @@ export default function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [isBiosecurityModalOpen, setIsBiosecurityModalOpen] = useState(false);
   const [isTopbarMenuOpen, setIsTopbarMenuOpen] = useState(false);
   const [editingPig, setEditingPig] = useState<PigRecord | null>(null);
   const [initialModalCoords, setInitialModalCoords] = useState<{ lat: number; lng: number; barangay?: string } | null>(null);
@@ -93,7 +98,7 @@ export default function App() {
       prevQueue.length !== currentQueue.length ||
       prevQueue.some((item, idx) => {
         const curr = currentQueue[idx];
-        return !curr || curr.status !== item.status || curr.updatedAt !== item.updatedAt;
+        return !curr || curr.status !== item.status || curr.timestamp !== item.timestamp;
       });
 
     if (hasQueueChanged) {
@@ -137,6 +142,73 @@ export default function App() {
       try {
         unsubscribe = subscribeToPigRecordUpdates((updatedPigs) => {
           if (isMounted && updatedPigs && Array.isArray(updatedPigs) && updatedPigs.length > 0) {
+            
+            // Check focal user push triggers
+            try {
+              const storedSettingsStr = localStorage.getItem('focal_notification_settings');
+              const settings = storedSettingsStr ? JSON.parse(storedSettingsStr) : {
+                notifyOnBarangayUpdate: true,
+                notifyOnSuspectStatus: true,
+                notifyOnQuarantineStatus: true,
+                enableBrowserPush: false,
+                soundAlerts: true
+              };
+
+              // Retrieve the current list of pigs from memory to compare states
+              let prevPigs: PigRecord[] = [];
+              setPigs(current => {
+                prevPigs = current || [];
+                return current;
+              });
+
+              updatedPigs.forEach(newPig => {
+                const oldPig = prevPigs.find(p => p.id === newPig.id);
+                const belongsToBarangay = currentUser && (currentUser.role === 'admin' || newPig.barangay === currentUser.barangay);
+
+                // A. Barangay Record Update Trigger
+                if (belongsToBarangay && settings.notifyOnBarangayUpdate) {
+                  const isNew = !oldPig;
+                  const wasModified = oldPig && (
+                    oldPig.ownerName !== newPig.ownerName ||
+                    oldPig.weight !== newPig.weight ||
+                    oldPig.vaccinated !== newPig.vaccinated ||
+                    oldPig.isDeceased !== newPig.isDeceased
+                  );
+                  if (isNew || wasModified) {
+                    triggerUnifiedAlert(
+                      `📢 Barangay Registry Update`,
+                      `Record updated for swine ${newPig.earTag} (${newPig.ownerName}) in Brgy. ${newPig.barangay}.`,
+                      settings
+                    );
+                  }
+                }
+
+                // B. Health Status Shift to 'Suspect' (unvaccinated and not deceased)
+                const isSuspect = !newPig.isDeceased && !newPig.vaccinated;
+                const wasPreviouslyNotSuspect = !oldPig || oldPig.isDeceased || oldPig.vaccinated;
+                if (isSuspect && wasPreviouslyNotSuspect && settings.notifyOnSuspectStatus) {
+                  triggerUnifiedAlert(
+                    `⚠️ Status: SUSPECT`,
+                    `Swine ${newPig.earTag} (${newPig.ownerName}) in Brgy. ${newPig.barangay} flagged as SUSPECT.`,
+                    settings
+                  );
+                }
+
+                // C. Health Status Shift to 'Quarantined' (recorded mortality event)
+                const isQuarantined = newPig.isDeceased;
+                const wasPreviouslyNotQuarantined = !oldPig || !oldPig.isDeceased;
+                if (isQuarantined && wasPreviouslyNotQuarantined && settings.notifyOnQuarantineStatus) {
+                  triggerUnifiedAlert(
+                    `🚨 Status: QUARANTINED`,
+                    `Swine ${newPig.earTag} (${newPig.ownerName}) in Brgy. ${newPig.barangay} is QUARANTINED (recorded mortality).`,
+                    settings
+                  );
+                }
+              });
+            } catch (err) {
+              console.error('Realtime notification check error:', err);
+            }
+
             setPigs(prev => {
               const pigMap = new Map<string, PigRecord>();
               (prev || []).forEach(p => pigMap.set(p.id, p));
@@ -183,6 +255,14 @@ export default function App() {
         : `Registered swine ${savedRecord.earTag} (${savedRecord.ownerName})`
     });
 
+    // Record audit log
+    logSystemAction(
+      currentUser,
+      isEditing ? 'UPDATE_SWINE' : 'REGISTER_SWINE',
+      `${isEditing ? 'Updated' : 'Registered'} swine tag ${savedRecord.earTag} for owner ${savedRecord.ownerName} in Brgy. ${savedRecord.barangay} (${savedRecord.breed}, ${savedRecord.purpose})`,
+      'pig'
+    );
+
     setEditingPig(null);
     setInitialModalCoords(null);
   };
@@ -205,12 +285,20 @@ export default function App() {
         data: { id: pigId, earTag: pig?.earTag },
         summary: `Deleted swine record ${pig?.earTag || pigId}`
       });
+
+      // Record audit log
+      logSystemAction(
+        currentUser,
+        'DELETE_SWINE',
+        `Deleted swine record ${pig?.earTag || pigId} from Brgy. ${pig?.barangay || 'Hinunangan'}`,
+        'pig'
+      );
     }
   };
 
   const handleAddUser = (newUser: User) => {
     setUsers(prev => {
-      const updated = [...prev, newUser];
+      const updated = [...prev.filter(u => u.username !== newUser.username), newUser];
       saveStoredUsers(updated);
       return updated;
     });
@@ -220,13 +308,60 @@ export default function App() {
       entityId: newUser.username,
       action: 'create',
       data: newUser,
-      summary: `Created focal person ${newUser.fullName} (${newUser.barangay})`
+      summary: `Created focal person ${newUser.fullName} (${newUser.barangay || 'Central'})`
     });
+
+    logSystemAction(
+      currentUser,
+      'CREATE_ACCOUNT',
+      `Created focal person account for ${newUser.fullName} (@${newUser.username}) assigned to Brgy. ${newUser.barangay || 'All'}`,
+      'user',
+      newUser.barangay
+    );
+
+    // Sync to backend DB API
+    fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newUser)
+    }).catch(err => console.warn('User create API notice:', err));
+  };
+
+  const handleUpdateUser = (updatedUser: User) => {
+    setUsers(prev => {
+      const updated = prev.map(u => u.username.toLowerCase() === updatedUser.username.toLowerCase() ? { ...u, ...updatedUser } : u);
+      saveStoredUsers(updated);
+      return updated;
+    });
+
+    enqueueSyncAction({
+      entityType: 'user',
+      entityId: updatedUser.username,
+      action: 'update',
+      data: updatedUser,
+      summary: `Updated user account @${updatedUser.username} (${updatedUser.fullName})`
+    });
+
+    logSystemAction(
+      currentUser,
+      'UPDATE_ACCOUNT',
+      `Updated user account @${updatedUser.username} (${updatedUser.fullName}, Brgy: ${updatedUser.barangay || 'All'}, Active: ${updatedUser.isActive !== false})`,
+      'user',
+      updatedUser.barangay
+    );
+
+    // Sync to backend DB API
+    fetch(`/api/users/${encodeURIComponent(updatedUser.username)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatedUser)
+    }).catch(err => console.warn('User update API notice:', err));
   };
 
   const handleDeleteUser = (username: string) => {
+    const targetUser = users.find(u => u.username.toLowerCase() === username.toLowerCase());
     setUsers(prev => {
-      const updated = prev.filter(u => u.username !== username);
+      const updated = prev.filter(u => u.username.toLowerCase() !== username.toLowerCase());
       saveStoredUsers(updated);
       return updated;
     });
@@ -238,6 +373,19 @@ export default function App() {
       data: { username },
       summary: `Deleted user account ${username}`
     });
+
+    logSystemAction(
+      currentUser,
+      'DELETE_ACCOUNT',
+      `Deleted user account @${username} (${targetUser?.fullName || username})`,
+      'user',
+      targetUser?.barangay
+    );
+
+    // Sync to backend DB API
+    fetch(`/api/users/${encodeURIComponent(username)}`, {
+      method: 'DELETE'
+    }).catch(err => console.warn('User delete API notice:', err));
   };
 
   const handleRestoreData = (restoredPigs: PigRecord[], restoredUsers: User[]) => {
@@ -321,6 +469,7 @@ export default function App() {
     { key: 'gis', label: t('nav.gis'), icon: MapIcon },
     { key: 'records', label: isAdmin ? t('nav.recordsAdmin') : t('nav.recordsFocal'), icon: ListOrdered },
     { key: 'print', label: t('nav.print'), icon: Printer },
+    { key: 'settings', label: t('nav.settings', undefined, 'User Settings'), icon: SettingsIcon },
     ...(isAdmin ? [{ key: 'accounts', label: t('nav.accounts'), icon: Users }] : [])
   ];
 
@@ -543,6 +692,7 @@ export default function App() {
                   {currentView === 'records' && (isAdmin ? t('topbar.recordsAdminTitle') : t('topbar.recordsFocalTitle', { barangay: currentUser.barangay || '' }))}
                   {currentView === 'accounts' && t('topbar.accountsTitle')}
                   {currentView === 'print' && t('topbar.printTitle')}
+                  {currentView === 'settings' && 'Focal Settings & Alerts'}
                 </motion.h1>
               </AnimatePresence>
             </div>
@@ -588,6 +738,16 @@ export default function App() {
                   : t('topbar.liveOnline')}
               </span>
               <Radio className={`w-3.5 h-3.5 shrink-0 ${realtimeStatus === 'connected' ? 'text-emerald-700 animate-pulse' : 'text-[#2F5C3F]'}`} />
+            </button>
+
+            {/* Quick Access Biosecurity SOP Checklist Button */}
+            <button
+              onClick={() => setIsBiosecurityModalOpen(true)}
+              className="flex items-center gap-1.5 font-sans text-xs px-2.5 sm:px-3 py-1.5 rounded-full border bg-emerald-50 hover:bg-emerald-100 border-emerald-300 text-emerald-900 transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95"
+              title="Open Quick-Access Biosecurity Protocol SOP Checklist"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+              <span className="hidden xs:inline font-bold">Biosecurity SOP</span>
             </button>
 
             {/* Scope Badge (Desktop / Large screen inline view) */}
@@ -694,6 +854,24 @@ export default function App() {
                           <ChevronRight className="w-3.5 h-3.5 text-[#55604F]" />
                         </button>
                       </div>
+
+                      {/* Biosecurity Checklist Quick Link */}
+                      <div className="pt-1 border-t border-[#DED2AE]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsTopbarMenuOpen(false);
+                            setIsBiosecurityModalOpen(true);
+                          }}
+                          className="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold flex items-center justify-between px-3 transition-colors cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <ShieldCheck className="w-4.5 h-4.5 text-emerald-700" />
+                            <span>Biosecurity SOP Checklist</span>
+                          </div>
+                          <ChevronRight className="w-3.5 h-3.5 text-emerald-700" />
+                        </button>
+                      </div>
                     </motion.div>
                   </>
                 )}
@@ -726,12 +904,14 @@ export default function App() {
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
                 className="w-full"
               >
-                <DashboardView
-                  pigs={pigs || []}
-                  currentUser={currentUser}
-                  onNavigate={(v) => setCurrentView(v)}
-                  onOpenAddModal={handleOpenNewRegistration}
-                />
+                <ErrorBoundary fallbackMessage="An error occurred while rendering the interactive dashboard stats. Re-syncing your database is recommended.">
+                  <DashboardView
+                    pigs={pigs || []}
+                    currentUser={currentUser}
+                    onNavigate={(v) => setCurrentView(v)}
+                    onOpenAddModal={handleOpenNewRegistration}
+                  />
+                </ErrorBoundary>
               </motion.div>
             )}
 
@@ -747,15 +927,17 @@ export default function App() {
                 }}
                 className="w-full h-full flex-1 flex flex-col"
               >
-                <GisMap
-                  pigs={pigs || []}
-                  currentUser={currentUser}
-                  onOpenAddModalWithCoords={handleOpenAddModalWithCoords}
-                  onEditPig={handleEditPig}
-                  geo={geo}
-                  focusPigId={focusPigId}
-                  pendingRecordIds={offlineSync.pendingRecordIds}
-                />
+                <ErrorBoundary fallbackMessage="An error occurred while loading the GIS spatial map layers. Please try refreshing.">
+                  <GisMap
+                    pigs={pigs || []}
+                    currentUser={currentUser}
+                    onOpenAddModalWithCoords={handleOpenAddModalWithCoords}
+                    onEditPig={handleEditPig}
+                    geo={geo}
+                    focusPigId={focusPigId}
+                    pendingRecordIds={offlineSync.pendingRecordIds}
+                  />
+                </ErrorBoundary>
               </motion.div>
             )}
 
@@ -768,18 +950,20 @@ export default function App() {
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
                 className="w-full"
               >
-                <RecordsView
-                  pigs={pigs || []}
-                  currentUser={currentUser}
-                  onOpenAddModal={handleOpenNewRegistration}
-                  onEditPig={handleEditPig}
-                  onDeletePig={handleDeletePig}
-                  onViewOnMap={handleViewPigOnMap}
-                  pendingRecordIds={offlineSync.pendingRecordIds}
-                  isOnline={offlineSync.isOnline}
-                  onTriggerSync={offlineSync.triggerSync}
-                  isSyncing={offlineSync.isSyncing}
-                />
+                <ErrorBoundary fallbackMessage="Unable to display swine registry records at this moment. Please refresh the page.">
+                  <RecordsView
+                    pigs={pigs || []}
+                    currentUser={currentUser}
+                    onOpenAddModal={handleOpenNewRegistration}
+                    onEditPig={handleEditPig}
+                    onDeletePig={handleDeletePig}
+                    onViewOnMap={handleViewPigOnMap}
+                    pendingRecordIds={offlineSync.pendingRecordIds}
+                    isOnline={offlineSync.isOnline}
+                    onTriggerSync={offlineSync.triggerSync}
+                    isSyncing={offlineSync.isSyncing}
+                  />
+                </ErrorBoundary>
               </motion.div>
             )}
 
@@ -792,27 +976,32 @@ export default function App() {
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
                 className="w-full"
               >
-                <AccountsView
-                  users={users || []}
-                  pigs={pigs || []}
-                  systemSettings={systemSettings}
-                  onUpdateSettings={async (newSettings) => {
-                    setSystemSettings(newSettings);
-                    const { saveSystemSettings } = await import('./services/settingsService');
-                    await saveSystemSettings(newSettings);
-                  }}
-                  onAddUser={handleAddUser}
-                  onDeleteUser={handleDeleteUser}
-                  onRestoreData={handleRestoreData}
-                  onResetData={handleResetData}
-                  onOpenSyncModal={() => setIsSyncModalOpen(true)}
-                  syncQueue={offlineSync.syncQueue}
-                  isOnline={offlineSync.isOnline}
-                  isSimulatedOffline={offlineSync.isSimulatedOffline}
-                  onToggleSimulateOffline={offlineSync.toggleSimulateOffline}
-                  onTriggerSync={offlineSync.triggerSync}
-                  isSyncing={offlineSync.isSyncing}
-                />
+                <ErrorBoundary fallbackMessage="The administration accounts manager crashed. Please reload.">
+                  <AccountsView
+                    users={users || []}
+                    pigs={pigs || []}
+                    currentUser={currentUser}
+                    onNavigate={(v) => setCurrentView(v)}
+                    systemSettings={systemSettings}
+                    onUpdateSettings={async (newSettings) => {
+                      setSystemSettings(newSettings);
+                      const { saveSystemSettings } = await import('./services/settingsService');
+                      await saveSystemSettings(newSettings);
+                    }}
+                    onAddUser={handleAddUser}
+                    onUpdateUser={handleUpdateUser}
+                    onDeleteUser={handleDeleteUser}
+                    onRestoreData={handleRestoreData}
+                    onResetData={handleResetData}
+                    onOpenSyncModal={() => setIsSyncModalOpen(true)}
+                    syncQueue={offlineSync.syncQueue}
+                    isOnline={offlineSync.isOnline}
+                    isSimulatedOffline={offlineSync.isSimulatedOffline}
+                    onToggleSimulateOffline={offlineSync.toggleSimulateOffline}
+                    onTriggerSync={offlineSync.triggerSync}
+                    isSyncing={offlineSync.isSyncing}
+                  />
+                </ErrorBoundary>
               </motion.div>
             )}
 
@@ -825,10 +1014,30 @@ export default function App() {
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
                 className="w-full"
               >
-                <PrintReportsView
-                  pigs={pigs || []}
-                  currentUser={currentUser}
-                />
+                <ErrorBoundary fallbackMessage="The print and reporting utility encountered an error rendering the document tables.">
+                  <PrintReportsView
+                    pigs={pigs || []}
+                    currentUser={currentUser}
+                  />
+                </ErrorBoundary>
+              </motion.div>
+            )}
+
+            {currentView === 'settings' && (
+              <motion.div
+                key="settings"
+                initial={{ opacity: 0, y: 14, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                className="w-full"
+              >
+                <ErrorBoundary fallbackMessage="Focal Settings view crashed. Realtime listeners are still active.">
+                  <UserSettingsView
+                    currentUser={currentUser}
+                    pigs={pigs || []}
+                  />
+                </ErrorBoundary>
               </motion.div>
             )}
           </AnimatePresence>
@@ -857,6 +1066,13 @@ export default function App() {
         isOpen={isSyncModalOpen}
         onClose={() => setIsSyncModalOpen(false)}
         offlineSync={offlineSync}
+      />
+
+      {/* BIOSECURITY SOP CHECKLIST MODAL */}
+      <BiosecurityChecklistModal
+        isOpen={isBiosecurityModalOpen}
+        onClose={() => setIsBiosecurityModalOpen(false)}
+        barangay={currentUser?.barangay}
       />
 
       {/* TOAST NOTIFICATION SYSTEM */}

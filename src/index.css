@@ -49,3 +49,24 @@
 .animate-spin-slow {
   animation: spin-slow 12s linear infinite;
 }
+
+/* Highly responsive maps-specific pulse keyframes */
+@keyframes pulse {
+  0% { transform: scale(0.95); opacity: 0.6; }
+  70% { transform: scale(1.25); opacity: 0; }
+  100% { transform: scale(0.95); opacity: 0; }
+}
+
+@keyframes pulse-quarantine {
+  0% { transform: scale(0.95); opacity: 0.75; }
+  70% { transform: scale(1.35); opacity: 0; }
+  100% { transform: scale(0.95); opacity: 0; }
+}
+
+.animate-pulse-red {
+  animation: pulse 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.animate-pulse-quarantine {
+  animation: pulse-quarantine 2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}

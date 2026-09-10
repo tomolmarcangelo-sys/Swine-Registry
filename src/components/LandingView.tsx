@@ -23,6 +23,7 @@ interface LandingViewProps {
   pigs: PigRecord[];
   onOpenLogin: () => void;
   onExploreProgram: () => void;
+  systemSettings?: SystemSettings;
 }
 
 export const LandingView: React.FC<LandingViewProps> = ({
@@ -52,22 +53,39 @@ export const LandingView: React.FC<LandingViewProps> = ({
   });
 
   return (
-    <div className="min-h-screen bg-[#F5EFDD] text-[#1E2B1F]">
+    <div className="min-h-screen text-[#1E2B1F] relative overflow-hidden">
+      {/* Hinunangan Southern Leyte Crisp Full-page Parallax Background */}
+      <div 
+        className="fixed inset-0 bg-cover bg-center bg-no-repeat z-0 scale-100"
+        style={{ 
+          backgroundImage: `url('https://southernleyte.gov.ph/wp-content/uploads/2023/04/hinunangan-1.jpg')` 
+        }}
+      />
+      {/* Clean, low-opacity warm gradient with zero blur to make the background perfectly clear and vivid */}
+      <div className="fixed inset-0 bg-gradient-to-b from-[#F5EFDD]/30 via-[#F5EFDD]/40 to-[#F5EFDD]/50 z-0" />
+
+      <div className="relative z-10 flex flex-col min-h-screen">
       
       {/* SITE NAVIGATION */}
       <nav className="sticky top-0 z-40 bg-[#F5EFDD]/90 backdrop-blur-md border-b border-[#DED2AE]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between gap-2">
           
-          <a href="#home" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-full bg-radial from-[#4F7A55] via-[#2F5C3F] to-[#203F2B] border-2 border-[#D9A441] flex items-center justify-center font-serif text-base font-bold text-[#D9A441] shadow-md group-hover:scale-105 transition-transform">
-              DA
-            </div>
+          <a href="#home" className="flex items-center gap-2 sm:gap-3 group shrink">
+            <img 
+              src={systemSettings?.logoUrl || "/hinunangan_logo.jpg"} 
+              alt="LGU Hinunangan OMAS Logo"
+              referrerPolicy="no-referrer"
+              className="w-10 h-10 rounded-full border-2 border-[#D9A441] shadow-md group-hover:scale-105 transition-transform shrink-0 object-cover bg-white"
+            />
             <div className="leading-tight">
-              <span className="font-serif font-bold text-base text-[#203F2B] block">
+              <span className="font-serif font-bold text-sm sm:text-base text-[#203F2B] block truncate max-w-[140px] sm:max-w-none">
                 Hinunangan DA Office
               </span>
-              <span className="font-sans text-[11px] text-[#55604F] tracking-wide block">
+              <span className="font-sans text-[10px] text-[#55604F] tracking-wide hidden sm:block">
                 Southern Leyte · Swine Registry &amp; Livestock Management
+              </span>
+              <span className="font-sans text-[10px] text-[#55604F] tracking-wide block sm:hidden">
+                Swine Registry System
               </span>
             </div>
           </a>
@@ -80,16 +98,18 @@ export const LandingView: React.FC<LandingViewProps> = ({
             <a href="#contact" className="hover:text-[#2F5C3F] transition-colors">{t('landing.contactUs')}</a>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Language Switcher Pill */}
-            <LanguageToggle variant="landing" />
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+            {/* Language Switcher Pill - Hidden on small mobile screens to prevent layout overflow */}
+            <div className="hidden sm:block">
+              <LanguageToggle variant="landing" />
+            </div>
 
             <button
               onClick={onOpenLogin}
-              className="flex items-center gap-2 bg-[#2F5C3F] hover:bg-[#203F2B] text-white px-4 py-2 rounded-full font-bold text-xs shadow-md transition-transform active:scale-95 cursor-pointer"
+              className="flex items-center gap-1.5 bg-[#2F5C3F] hover:bg-[#203F2B] text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-full font-bold text-[11px] sm:text-xs shadow-md transition-transform active:scale-95 cursor-pointer shrink-0"
             >
               <span>{t('landing.loginBtn')}</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             </button>
 
             {/* Mobile Burger */}
@@ -125,24 +145,24 @@ export const LandingView: React.FC<LandingViewProps> = ({
       <header id="home" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-16">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           
-          <div className="lg:col-span-7 space-y-6">
-            <div className="inline-flex items-center gap-2 bg-[#FBF8EF] border border-[#DED2AE] rounded-full px-3.5 py-1 text-xs font-mono text-[#D9A441] font-semibold">
-              <span className="w-2 h-2 rounded-full bg-[#2F5C3F] animate-pulse" />
-              Office of the Municipal Agriculturist · Hinunangan
+          <div className="lg:col-span-7 bg-white/85 backdrop-blur-md border border-[#DED2AE]/60 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+            <div className="inline-flex items-center gap-2 bg-[#FBF8EF] border border-[#DED2AE] rounded-full px-3.5 py-1 text-[10px] sm:text-xs font-mono text-[#D9A441] font-semibold max-w-full overflow-hidden">
+              <span className="w-2 h-2 rounded-full bg-[#2F5C3F] animate-pulse shrink-0" />
+              <span className="truncate">Municipal Agriculture Office · Hinunangan</span>
             </div>
 
-            <h1 className="font-serif text-4xl sm:text-5xl lg:text-6xl font-bold text-[#203F2B] leading-[1.08] tracking-tight">
+            <h1 className="font-serif text-3xl sm:text-4xl lg:text-5xl font-bold text-[#203F2B] leading-[1.12] tracking-tight">
               {systemSettings.landingHeroTitle || 'Rice Granary of Southern Leyte, now registering every backyard herd.'}
             </h1>
 
-            <p className="text-base sm:text-lg text-[#55604F] leading-relaxed max-w-xl">
+            <p className="text-sm sm:text-base text-[#55604F] leading-relaxed max-w-xl">
               {systemSettings.landingHeroSubtitle || 'The official Swine Registration & Livestock Management System of Hinunangan\'s Municipal Agriculture Office — connecting all 40 barangays to track herd health, guide biosecurity response, and empower local hog raisers.'}
             </p>
 
-            <div className="flex flex-wrap items-center gap-3.5 pt-2">
+            <div className="flex flex-wrap items-center gap-3 pt-2">
               <button
                 onClick={onOpenLogin}
-                className="flex items-center gap-2 bg-[#2F5C3F] hover:bg-[#203F2B] text-white px-6 py-3.5 rounded-full font-bold text-sm shadow-lg transition-transform active:scale-95 cursor-pointer"
+                className="flex items-center gap-2 bg-[#2F5C3F] hover:bg-[#203F2B] text-white px-5 py-3 rounded-full font-bold text-xs sm:text-sm shadow-lg transition-transform active:scale-95 cursor-pointer"
               >
                 <span>Barangay Focal Person Login</span>
                 <ArrowRight className="w-4 h-4" />
@@ -150,7 +170,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
 
               <a
                 href="#services"
-                className="flex items-center gap-2 bg-white hover:bg-[#FBF8EF] text-[#203F2B] border border-[#DED2AE] px-6 py-3.5 rounded-full font-bold text-sm transition-colors shadow-xs"
+                className="flex items-center gap-2 bg-white hover:bg-[#FBF8EF] text-[#203F2B] border border-[#DED2AE] px-5 py-3 rounded-full font-bold text-xs sm:text-sm transition-colors shadow-xs"
               >
                 <ClipboardList className="w-4 h-4 text-[#2F5C3F]" />
                 <span>Explore Programs &amp; Registry</span>
@@ -161,19 +181,19 @@ export const LandingView: React.FC<LandingViewProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-6 border-t border-[#DED2AE]/60 font-mono text-xs">
               <div>
                 <strong className="block font-serif text-2xl font-bold text-[#203F2B]">{totalRegistered}</strong>
-                <span className="text-[11px] text-[#55604F] uppercase tracking-wider">Registered Swine</span>
+                <span className="text-[10px] text-[#55604F] uppercase tracking-wider">Registered Swine</span>
               </div>
               <div>
                 <strong className="block font-serif text-2xl font-bold text-[#203F2B]">40</strong>
-                <span className="text-[11px] text-[#55604F] uppercase tracking-wider">Barangays Covered</span>
+                <span className="text-[10px] text-[#55604F] uppercase tracking-wider">Barangays Covered</span>
               </div>
               <div>
                 <strong className="block font-serif text-2xl font-bold text-[#203F2B]">{backyardCount}</strong>
-                <span className="text-[11px] text-[#55604F] uppercase tracking-wider">Backyard Raisers</span>
+                <span className="text-[10px] text-[#55604F] uppercase tracking-wider">Backyard Raisers</span>
               </div>
               <div>
                 <strong className="block font-serif text-2xl font-bold text-[#203F2B]">{thisMonthCount}</strong>
-                <span className="text-[11px] text-[#55604F] uppercase tracking-wider">This Month</span>
+                <span className="text-[10px] text-[#55604F] uppercase tracking-wider">This Month</span>
               </div>
             </div>
           </div>
@@ -183,7 +203,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
             {systemSettings?.landingHeroPhotoUrl ? (
               <img src={systemSettings.landingHeroPhotoUrl} alt="Hero" className="w-full h-auto aspect-square object-cover rounded-3xl shadow-xl border border-[#DED2AE]" />
             ) : (
-              <div className="bg-white border border-[#DED2AE] rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
+              <div className="bg-white/80 backdrop-blur-md border border-[#DED2AE]/60 rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden hover:bg-white/95 transition-all duration-300">
                 <div className="space-y-4">
                   <div className="w-12 h-12 rounded-2xl bg-[#F5EFDD] text-[#2F5C3F] flex items-center justify-center font-bold">
                     <ShieldCheck className="w-6 h-6" />
@@ -232,22 +252,22 @@ export const LandingView: React.FC<LandingViewProps> = ({
 
       {/* PROGRAMS & SERVICES */}
       <section id="services" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-        <div className="max-w-2xl mb-12">
+        <div className="max-w-2xl mb-12 bg-white/85 backdrop-blur-md border border-[#DED2AE]/60 rounded-3xl p-6 sm:p-8 shadow-md">
           <span className="font-mono text-xs font-bold uppercase tracking-widest text-[#D9A441] block mb-2">
             What The Office Runs
           </span>
-          <h2 className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B]">
+          <h2 className="font-serif text-2xl sm:text-3xl font-bold text-[#203F2B]">
             Field-tested livestock programs for Hinunangan's hog raisers.
           </h2>
-          <p className="text-sm text-[#55604F] mt-3">
+          <p className="text-xs sm:text-sm text-[#55604F] mt-3">
             Coordinated assistance from Poblacion's central municipal office to our upland and coastal communities.
           </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           
-          <div className="bg-white border border-[#DED2AE] rounded-2xl p-6 shadow-xs hover:shadow-md transition-shadow">
-            <div className="w-12 h-12 rounded-xl bg-[#F5EFDD] text-[#2F5C3F] flex items-center justify-center mb-4">
+          <div className="bg-white/80 backdrop-blur-md border border-[#DED2AE]/60 rounded-2xl p-6 shadow-sm hover:bg-white/95 hover:shadow-md hover:-translate-y-1 transition-all duration-300">
+            <div className="w-12 h-12 rounded-xl bg-[#F5EFDD] text-[#2F5C3F] flex items-center justify-center mb-4 shadow-2xs">
               <ClipboardList className="w-6 h-6" />
             </div>
             <h3 className="font-serif text-lg font-bold text-[#203F2B] mb-2">
@@ -258,8 +278,8 @@ export const LandingView: React.FC<LandingViewProps> = ({
             </p>
           </div>
 
-          <div className="bg-white border border-[#DED2AE] rounded-2xl p-6 shadow-xs hover:shadow-md transition-shadow">
-            <div className="w-12 h-12 rounded-xl bg-[#F5EFDD] text-rose-700 flex items-center justify-center mb-4">
+          <div className="bg-white/80 backdrop-blur-md border border-[#DED2AE]/60 rounded-2xl p-6 shadow-sm hover:bg-white/95 hover:shadow-md hover:-translate-y-1 transition-all duration-300">
+            <div className="w-12 h-12 rounded-xl bg-[#F5EFDD] text-rose-700 flex items-center justify-center mb-4 shadow-2xs">
               <ShieldCheck className="w-6 h-6" />
             </div>
             <h3 className="font-serif text-lg font-bold text-[#203F2B] mb-2">
@@ -270,8 +290,8 @@ export const LandingView: React.FC<LandingViewProps> = ({
             </p>
           </div>
 
-          <div className="bg-white border border-[#DED2AE] rounded-2xl p-6 shadow-xs hover:shadow-md transition-shadow">
-            <div className="w-12 h-12 rounded-xl bg-[#F5EFDD] text-[#D9A441] flex items-center justify-center mb-4">
+          <div className="bg-white/80 backdrop-blur-md border border-[#DED2AE]/60 rounded-2xl p-6 shadow-sm hover:bg-white/95 hover:shadow-md hover:-translate-y-1 transition-all duration-300">
+            <div className="w-12 h-12 rounded-xl bg-[#F5EFDD] text-[#D9A441] flex items-center justify-center mb-4 shadow-2xs">
               <Building2 className="w-6 h-6" />
             </div>
             <h3 className="font-serif text-lg font-bold text-[#203F2B] mb-2">
@@ -282,8 +302,8 @@ export const LandingView: React.FC<LandingViewProps> = ({
             </p>
           </div>
 
-          <div className="bg-white border border-[#DED2AE] rounded-2xl p-6 shadow-xs hover:shadow-md transition-shadow">
-            <div className="w-12 h-12 rounded-xl bg-[#F5EFDD] text-[#2563EB] flex items-center justify-center mb-4">
+          <div className="bg-white/80 backdrop-blur-md border border-[#DED2AE]/60 rounded-2xl p-6 shadow-sm hover:bg-white/95 hover:shadow-md hover:-translate-y-1 transition-all duration-300">
+            <div className="w-12 h-12 rounded-xl bg-[#F5EFDD] text-[#2563EB] flex items-center justify-center mb-4 shadow-2xs">
               <FileText className="w-6 h-6" />
             </div>
             <h3 className="font-serif text-lg font-bold text-[#203F2B] mb-2">
@@ -298,57 +318,59 @@ export const LandingView: React.FC<LandingViewProps> = ({
       </section>
 
       {/* ALL 40 BARANGAYS DIRECTORY */}
-      <section id="barangays" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 bg-white/40 border-y border-[#DED2AE]">
+      <section id="barangays" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 bg-white/30 backdrop-blur-sm border-y border-[#DED2AE]/60 rounded-3xl my-6">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
-          <div className="max-w-xl">
+          <div className="max-w-xl bg-white/85 backdrop-blur-md border border-[#DED2AE]/60 rounded-3xl p-6 sm:p-8 shadow-md">
             <span className="font-mono text-xs font-bold uppercase tracking-widest text-[#D9A441] block mb-2">
               Full Municipality Coverage
             </span>
-            <h2 className="font-serif text-3xl sm:text-4xl font-bold text-[#203F2B]">
+            <h2 className="font-serif text-2xl sm:text-3xl font-bold text-[#203F2B]">
               All 40 Barangays of Hinunangan
             </h2>
-            <p className="text-sm text-[#55604F] mt-2">
+            <p className="text-xs sm:text-sm text-[#55604F] mt-2">
               Each barangay operates its own scoped agricultural focal person account for decentralized registration.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 bg-white border border-[#DED2AE] p-1 rounded-xl text-xs font-semibold">
+          <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md border border-[#DED2AE]/60 p-1.5 rounded-2xl text-xs font-semibold shadow-xs">
             <button
               onClick={() => setSelectedBrgyFilter('all')}
-              className={`px-3 py-1.5 rounded-lg cursor-pointer ${selectedBrgyFilter === 'all' ? 'bg-[#2F5C3F] text-white font-bold' : 'text-[#55604F]'}`}
+              className={`px-4 py-2 rounded-xl cursor-pointer transition-all duration-200 ${selectedBrgyFilter === 'all' ? 'bg-[#2F5C3F] text-white font-bold shadow-xs' : 'text-[#55604F] hover:bg-[#F5EFDD]/50'}`}
             >
               All (40)
             </button>
             <button
               onClick={() => setSelectedBrgyFilter('coastal')}
-              className={`px-3 py-1.5 rounded-lg cursor-pointer ${selectedBrgyFilter === 'coastal' ? 'bg-[#2F5C3F] text-white font-bold' : 'text-[#55604F]'}`}
+              className={`px-4 py-2 rounded-xl cursor-pointer transition-all duration-200 ${selectedBrgyFilter === 'coastal' ? 'bg-[#2F5C3F] text-white font-bold shadow-xs' : 'text-[#55604F] hover:bg-[#F5EFDD]/50'}`}
             >
               Coastal Sectors
             </button>
             <button
               onClick={() => setSelectedBrgyFilter('inland')}
-              className={`px-3 py-1.5 rounded-lg cursor-pointer ${selectedBrgyFilter === 'inland' ? 'bg-[#2F5C3F] text-white font-bold' : 'text-[#55604F]'}`}
+              className={`px-4 py-2 rounded-xl cursor-pointer transition-all duration-200 ${selectedBrgyFilter === 'inland' ? 'bg-[#2F5C3F] text-white font-bold shadow-xs' : 'text-[#55604F] hover:bg-[#F5EFDD]/50'}`}
             >
               Inland &amp; Upland
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
           {filteredBarangays.map(b => (
             <div
               key={b.name}
-              className="bg-white border border-[#DED2AE] rounded-xl p-3 shadow-2xs hover:border-[#2F5C3F] transition-colors"
+              className="bg-white/80 backdrop-blur-md border border-[#DED2AE]/60 rounded-2xl p-4 shadow-sm hover:border-[#2F5C3F] hover:bg-white hover:shadow-md hover:-translate-y-0.5 transition-all duration-300"
             >
               <div className="flex items-center justify-between mb-1">
                 <span className="font-serif font-bold text-sm text-[#203F2B]">
                   {b.name}
                 </span>
-                <span className={`w-2 h-2 rounded-full ${b.isCoastal ? 'bg-blue-500' : 'bg-emerald-500'}`} />
+                <span className={`w-2.5 h-2.5 rounded-full ${b.isCoastal ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'}`} />
               </div>
-              <div className="text-[11px] text-[#55604F] mt-1 flex items-center justify-between">
+              <div className="text-[11px] text-[#55604F] mt-2 flex items-center justify-between font-medium">
                 <span>{b.purokCount} Puroks</span>
-                <span className="text-[10px] text-[#2F5C3F] font-semibold">{b.isCoastal ? 'Coastal' : 'Inland'}</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${b.isCoastal ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                  {b.isCoastal ? 'Coastal' : 'Inland'}
+                </span>
               </div>
             </div>
           ))}
@@ -387,9 +409,12 @@ export const LandingView: React.FC<LandingViewProps> = ({
             
             <div className="space-y-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-radial from-[#4F7A55] to-[#203F2B] border-2 border-[#D9A441] flex items-center justify-center font-serif text-base font-bold text-[#D9A441]">
-                  DA
-                </div>
+                <img 
+                  src={systemSettings?.logoUrl || "/hinunangan_logo.jpg"} 
+                  alt="LGU Hinunangan OMAS Logo"
+                  referrerPolicy="no-referrer"
+                  className="w-10 h-10 rounded-full border-2 border-[#D9A441] shadow-md shrink-0 object-cover bg-white"
+                />
                 <div className="leading-tight">
                   <span className="font-serif font-bold text-base text-white block">Hinunangan DA Office</span>
                   <span className="text-[11px] text-[#93A893]">Municipal Agriculture</span>
@@ -453,6 +478,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
         </div>
       </footer>
 
+      </div>
     </div>
   );
 };
