@@ -1,0 +1,164 @@
+{
+  "purposes": {
+    "BACKYARD_RAISING": {
+      "label": "Backyard Raising",
+      "purposeKey": "Backyard Raising",
+      "requiredFields": [
+        "owner_name",
+        "barangay",
+        "head_count",
+        "health_status"
+      ],
+      "biosecurityWeight": 1.0,
+      "pcicEligible": true,
+      "maxRecommendedHeads": 20,
+      "minBiosecurityForPcic": 4,
+      "description": "Small-scale household swine production primarily for family sustenance and local trade."
+    },
+    "BREEDING_STOCK": {
+      "label": "Breeding Stock",
+      "purposeKey": "Breeding Stock",
+      "requiredFields": [
+        "owner_name",
+        "barangay",
+        "breed",
+        "vaccination_status",
+        "lat",
+        "lng"
+      ],
+      "biosecurityWeight": 1.5,
+      "pcicEligible": true,
+      "minBiosecurityForPcic": 5,
+      "description": "Registered genetic breeding boars and sows requiring strict sanitary isolation and verified vaccination."
+    },
+    "COMMERCIAL_FATTENING": {
+      "label": "Fattening/Commercial",
+      "purposeKey": "Fattening/Commercial",
+      "requiredFields": [
+        "owner_name",
+        "barangay",
+        "head_count",
+        "weight",
+        "housing_type",
+        "feeding_type",
+        "lat",
+        "lng"
+      ],
+      "biosecurityWeight": 1.8,
+      "pcicEligible": true,
+      "minBiosecurityForPcic": 5,
+      "description": "Market hog finishing pens with scheduled feed logs and regular waste containment."
+    },
+    "PIGGERY": {
+      "label": "Piggery",
+      "purposeKey": "Piggery",
+      "requiredFields": [
+        "owner_name",
+        "barangay",
+        "head_count",
+        "housing_type",
+        "waste_management",
+        "lat",
+        "lng"
+      ],
+      "biosecurityWeight": 2.0,
+      "pcicEligible": true,
+      "minBiosecurityForPcic": 6,
+      "description": "High-density multi-pen enterprise requiring perimeter barrier disinfection and environmental containment."
+    },
+    "COMMERCIAL_BREEDING": {
+      "label": "Commercial Breeding",
+      "purposeKey": "Commercial Breeding",
+      "requiredFields": [
+        "owner_name",
+        "barangay",
+        "breed",
+        "vaccination_status",
+        "housing_type",
+        "lat",
+        "lng"
+      ],
+      "biosecurityWeight": 2.0,
+      "pcicEligible": true,
+      "minBiosecurityForPcic": 6,
+      "description": "Specialized commercial breeding multiplier farm producing registered piglets."
+    }
+  },
+  "housingOptions": [
+    "Concrete Pen with Roofing",
+    "Elevated Slatted Flooring",
+    "Deep Litter Bedding (Natural Piggery)",
+    "Semi-Enclosed Hollow Block",
+    "Traditional Native / Tethered"
+  ],
+  "feedingOptions": [
+    "Commercial Feeds Only (DA Compliant)",
+    "Commercial + Cooked Forage Crops",
+    "Rootcrops & Cooked Vegetables",
+    "Zero-Swill Certified Mixed Feed"
+  ],
+  "wasteManagementOptions": [
+    "Biogas Digester System",
+    "Covered Septic Containment Tank",
+    "Composting & Organic Fertilizer Pit",
+    "Settling Lagoon with Filter Bed"
+  ],
+  "biosecurity": {
+    "totalChecklistItems": 7,
+    "passingScore": 4,
+    "criticalDeficitThreshold": 3,
+    "zeroSwillStrictEnforcement": true,
+    "protocols": [
+      { "key": "footbathMaintenance", "name": "Disinfectant Footbath at Entrance", "critical": true, "weight": 1.2 },
+      { "key": "fencingIntegrity", "name": "Perimeter Fencing (Wild/Stray Animal Barrier)", "critical": true, "weight": 1.0 },
+      { "key": "swillFeedingBanned", "name": "100% Zero-Swill Feeding Compliance (DA ASF Ban)", "critical": true, "weight": 2.0 },
+      { "key": "disinfectionRoutine", "name": "Regular Pen Cleaning & Disinfection", "critical": false, "weight": 1.0 },
+      { "key": "visitorLogControl", "name": "Visitor & Vehicle Sanitation Control", "critical": false, "weight": 0.8 },
+      { "key": "quarantineIsolationPen", "name": "Dedicated Quarantine / Isolation Pen", "critical": false, "weight": 1.0 },
+      { "key": "cleanWaterSource", "name": "Clean Enclosed Potable Water Supply", "critical": false, "weight": 1.0 }
+    ]
+  },
+  "asfRiskClassification": {
+    "GREEN": {
+      "level": "Low Risk (Green / Free Zone)",
+      "badgeColor": "emerald",
+      "description": "Zero reported mortalities, high biosecurity score (>= 5), and zero swill compliance."
+    },
+    "YELLOW": {
+      "level": "Moderate Risk (Yellow / Surveillance Zone)",
+      "badgeColor": "amber",
+      "description": "Baseline backyard pens with moderate biosecurity (score 3-4) under standard observation."
+    },
+    "PINK": {
+      "level": "High Risk (Pink / Buffer Zone)",
+      "badgeColor": "rose",
+      "description": "Pens lacking disinfectant footbath, unverified vaccination, or within 1km of suspect alerts."
+    },
+    "RED": {
+      "level": "Critical Alert (Red / Infected Zone)",
+      "badgeColor": "red",
+      "description": "Active suspect/quarantined herd, unaddressed mortality, or active swill feeding violation."
+    }
+  },
+  "pcicInsurance": {
+    "program": "Philippine Crop Insurance Corporation (PCIC) Swine Livestock Program",
+    "minBiosecurityBackyard": 4,
+    "minBiosecurityCommercial": 5,
+    "requireVaccination": true,
+    "requireZeroSwill": true,
+    "requireMunicipalEarTag": true,
+    "requirePreciseGps": true,
+    "maxGpsAccuracyMeters": 50
+  },
+  "spatialSurveillance": {
+    "municipality": "Hinunangan",
+    "province": "Southern Leyte",
+    "defaultCenter": {
+      "lat": 10.3969,
+      "lng": 125.1999
+    },
+    "densityClusterRadiusMeters": 1000,
+    "surveillanceBufferRadiusMeters": 1500,
+    "maxAllowedGpsAccuracy": 50.0
+  }
+}

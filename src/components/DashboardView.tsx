@@ -31,6 +31,11 @@ import { BARANGAYS_DATA, PURPOSE_COLORS, PURPOSES } from '../data/constants';
 import { AppViewMode, PigRecord, User } from '../types';
 import { useI18n } from '../i18n/I18nContext';
 import { DemographicsDistributionChart } from './DemographicsDistributionChart';
+import { 
+  calculateBiosecurityScore, 
+  determineAsfRiskLevel, 
+  evaluatePcicEligibility 
+} from '../config/systemLogic';
 
 interface DashboardViewProps {
   pigs: PigRecord[];
@@ -52,6 +57,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     : (pigs || []).filter(p => p.barangay === currentUser.barangay);
 
   const totalHeads = scopedPigs.length;
+  const totalAnimalCount = scopedPigs.reduce((sum, p) => sum + (p.headCount || 1), 0);
   const backyardCount = scopedPigs.filter(p => p.purpose === 'Backyard Raising').length;
   const vaccinatedCount = scopedPigs.filter(p => p.vaccinated).length;
   const deceasedCount = scopedPigs.filter(p => p.isDeceased).length;
@@ -62,6 +68,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     : '0';
 
   const coveredBrgyCount = new Set(scopedPigs.map(p => p.barangay)).size;
+
+  // Schema-driven intelligence calculations
+  const pcicEligibleCount = scopedPigs.filter(p => evaluatePcicEligibility(p).isEligible).length;
+  const pcicEligiblePct = totalHeads > 0 ? Math.round((pcicEligibleCount / totalHeads) * 100) : 0;
+
+  const asfRiskCounts = { GREEN: 0, YELLOW: 0, PINK: 0, RED: 0 };
+  let totalBiosecurityScore = 0;
+  scopedPigs.forEach(p => {
+    const risk = determineAsfRiskLevel(p);
+    asfRiskCounts[risk.code] = (asfRiskCounts[risk.code] || 0) + 1;
+    totalBiosecurityScore += calculateBiosecurityScore(p.biosecurity).score;
+  });
+  const avgBioScore = totalHeads > 0 ? (totalBiosecurityScore / totalHeads).toFixed(1) : '7.0';
 
   // Purpose breakdown
   const purposeCounts: Record<string, number> = {};
@@ -360,6 +379,79 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
+      {/* ASF BIOSECURITY PROTOCOL & PCIC INSURANCE INTELLIGENCE WIDGET */}
+      <div className="bg-white border border-[#DED2AE] rounded-2xl p-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-serif text-lg font-bold text-[#203F2B] flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-[#2F5C3F]" />
+              <span>ASF Biosecurity Zonation &amp; Insurance Protection</span>
+            </h3>
+            <p className="text-xs text-[#55604F]">
+              Official DA-BAI Administrative Circular 02 evaluation and Philippine Crop Insurance Corporation (PCIC) coverage index.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono font-bold bg-[#F5EFDD] text-[#203F2B] px-3 py-1 rounded-xl border border-[#DED2AE]">
+              Avg Biosecurity: {avgBioScore}/7.0
+            </span>
+          </div>
+        </div>
+
+        {/* 4-Zone Matrix & PCIC Summary */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          {/* Green Zone */}
+          <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-mono font-bold uppercase text-emerald-800">🟢 Green Zone</span>
+              <span className="text-xs font-mono font-bold text-emerald-900">{asfRiskCounts.GREEN}</span>
+            </div>
+            <p className="text-[11px] text-emerald-900 font-semibold">Free &amp; Protected</p>
+            <p className="text-[10px] text-emerald-700 mt-0.5">Compliant &ge;5/7, vaccinated</p>
+          </div>
+
+          {/* Yellow Zone */}
+          <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-mono font-bold uppercase text-amber-800">🟡 Yellow Zone</span>
+              <span className="text-xs font-mono font-bold text-amber-900">{asfRiskCounts.YELLOW}</span>
+            </div>
+            <p className="text-[11px] text-amber-900 font-semibold">Surveillance Zone</p>
+            <p className="text-[10px] text-amber-700 mt-0.5">Unvaccinated or borderline</p>
+          </div>
+
+          {/* Pink Zone */}
+          <div className="p-3 bg-pink-50/80 border border-pink-200 rounded-xl">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-mono font-bold uppercase text-pink-800">🌸 Pink Zone</span>
+              <span className="text-xs font-mono font-bold text-pink-900">{asfRiskCounts.PINK}</span>
+            </div>
+            <p className="text-[11px] text-pink-900 font-semibold">Buffer / Deficit</p>
+            <p className="text-[10px] text-pink-700 mt-0.5">Score &le;3/7 protocols missing</p>
+          </div>
+
+          {/* Red Zone */}
+          <div className="p-3 bg-rose-50/80 border border-rose-200 rounded-xl">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-mono font-bold uppercase text-rose-800">🔴 Red Zone</span>
+              <span className="text-xs font-mono font-bold text-rose-900">{asfRiskCounts.RED}</span>
+            </div>
+            <p className="text-[11px] text-rose-900 font-semibold">Infected / High Risk</p>
+            <p className="text-[10px] text-rose-700 mt-0.5">Deceased or swill-feeding</p>
+          </div>
+
+          {/* PCIC Free Insurance Card */}
+          <div className="p-3 bg-teal-50/80 border border-teal-200 rounded-xl col-span-2 lg:col-span-1">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-mono font-bold uppercase text-teal-800">🛡️ PCIC Qualified</span>
+              <span className="text-xs font-mono font-bold text-teal-900">{pcicEligibleCount} ({pcicEligiblePct}%)</span>
+            </div>
+            <p className="text-[11px] text-teal-900 font-semibold">Govt Indemnity Ready</p>
+            <p className="text-[10px] text-teal-700 mt-0.5">Under cap &amp; zero swill</p>
+          </div>
+        </div>
+      </div>
+
       {/* SWINE DEMOGRAPHICS & RESOURCE ALLOCATION (RECHARTS DISTRIBUTION CHARTS) */}
       <DemographicsDistributionChart 
         pigs={scopedPigs}
@@ -629,45 +721,81 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-[#EAE1C4]">
-              {recentPigs.map(pig => (
-                <tr key={pig.id} className="hover:bg-[#FBF8EF]/60 transition-colors">
-                  <td className="py-3 px-3 font-mono font-bold text-[#203F2B]">
-                    {pig.earTag}
-                  </td>
-                  <td className="py-3 px-3">
-                    <div className="font-semibold text-[#1E2B1F]">{pig.ownerName}</div>
-                    <div className="text-[11px] text-[#55604F] truncate max-w-[200px]">{pig.address}</div>
-                  </td>
-                  {isAdmin && (
-                    <td className="py-3 px-3 font-medium">
-                      Brgy. {pig.barangay}
+              {recentPigs.map(pig => {
+                const bioEval = calculateBiosecurityScore(pig.biosecurity);
+                const asfRisk = determineAsfRiskLevel(pig);
+                const pcicEval = evaluatePcicEligibility(pig);
+                const headCount = pig.headCount || 1;
+
+                return (
+                  <tr key={pig.id} className="hover:bg-[#FBF8EF]/60 transition-colors">
+                    <td className="py-3 px-3 font-mono font-bold text-[#203F2B]">
+                      {pig.earTag}
                     </td>
-                  )}
-                  <td className="py-3 px-3">
-                    {pig.breed} ({pig.sex})
-                  </td>
-                  <td className="py-3 px-3 font-mono">
-                    {pig.weight} kg
-                  </td>
-                  <td className="py-3 px-3">
-                    <span 
-                      className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider text-white"
-                      style={{ background: PURPOSE_COLORS[pig.purpose] || '#2F5C3F' }}
-                    >
-                      {pig.purpose}
-                    </span>
-                  </td>
-                  <td className="py-3 px-3">
-                    <span className={`inline-flex items-center gap-1 font-semibold text-[11px] ${pig.vaccinated ? 'text-emerald-700' : 'text-amber-700'}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${pig.vaccinated ? 'bg-emerald-600' : 'bg-amber-500'}`} />
-                      {pig.vaccinated ? 'Vaccinated' : 'Pending'}
-                    </span>
-                  </td>
-                  <td className="py-3 px-3 text-right font-mono text-[#55604F]">
-                    {pig.dateRegistered}
-                  </td>
-                </tr>
-              ))}
+                    <td className="py-3 px-3">
+                      <div className="font-semibold text-[#1E2B1F]">{pig.ownerName}</div>
+                      <div className="text-[11px] text-[#55604F] truncate max-w-[200px]">{pig.address}</div>
+                    </td>
+                    {isAdmin && (
+                      <td className="py-3 px-3 font-medium">
+                        Brgy. {pig.barangay}
+                      </td>
+                    )}
+                    <td className="py-3 px-3">
+                      {pig.breed} ({pig.sex})
+                    </td>
+                    <td className="py-3 px-3 font-mono">
+                      {pig.weight} kg
+                    </td>
+                    <td className="py-3 px-3">
+                      <div className="space-y-0.5">
+                        <span 
+                          className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider text-white inline-block"
+                          style={{ background: PURPOSE_COLORS[pig.purpose] || '#2F5C3F' }}
+                        >
+                          {pig.purpose}
+                        </span>
+                        <div className="text-[10px] font-mono text-[#55604F]">
+                          {headCount} {headCount > 1 ? 'heads' : 'head'}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1">
+                          <span className={`inline-flex items-center gap-1 font-semibold text-[11px] ${pig.vaccinated ? 'text-emerald-700' : 'text-amber-700'}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${pig.vaccinated ? 'bg-emerald-600' : 'bg-amber-500'}`} />
+                            {pig.vaccinated ? 'Vaccinated' : 'Pending'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span 
+                            className={`text-[9px] px-1.5 py-0.2 rounded font-bold border ${
+                              asfRisk.code === 'GREEN' ? 'bg-emerald-50 text-emerald-800 border-emerald-300' :
+                              asfRisk.code === 'YELLOW' ? 'bg-amber-50 text-amber-800 border-amber-300' :
+                              asfRisk.code === 'PINK' ? 'bg-pink-50 text-pink-800 border-pink-300' :
+                              'bg-rose-50 text-rose-800 border-rose-300'
+                            }`}
+                          >
+                            {asfRisk.level}
+                          </span>
+                          <span className="text-[9px] font-mono px-1 bg-[#F5EFDD] border border-[#DED2AE] text-[#203F2B] rounded">
+                            {bioEval.score}/7
+                          </span>
+                          {pcicEval.isEligible && (
+                            <span className="text-[9px] px-1 bg-teal-50 text-teal-800 border border-teal-300 rounded font-bold">
+                              PCIC ✓
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 text-right font-mono text-[#55604F]">
+                      {pig.dateRegistered}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

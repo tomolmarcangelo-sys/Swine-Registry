@@ -12,6 +12,8 @@ export const supabaseServerAdmin: SupabaseClient = createClient(supabaseUrl, sup
 
 export interface PrismaPigRecordDelegate {
   findMany: (args?: any) => Promise<any[]>;
+  findUnique: (args: { where: { id: string } }) => Promise<any | null>;
+  findFirst: (args?: any) => Promise<any | null>;
   upsert: (args: any) => Promise<any>;
   delete: (args: any) => Promise<any>;
   count: (args?: any) => Promise<number>;
@@ -19,6 +21,8 @@ export interface PrismaPigRecordDelegate {
 
 export interface PrismaUserDelegate {
   findMany: (args?: any) => Promise<any[]>;
+  findUnique: (args: { where: { username: string } }) => Promise<any | null>;
+  findFirst: (args?: any) => Promise<any | null>;
   upsert: (args: any) => Promise<any>;
   delete: (args: any) => Promise<any>;
   count: (args?: any) => Promise<number>;
@@ -44,6 +48,24 @@ export class PrismaClientEngine {
         const { data, error } = await query;
         if (error) throw error;
         return (data || []).map(rowToPig);
+      },
+      findUnique: async (args: { where: { id: string } }) => {
+        const { data, error } = await supabaseServerAdmin
+          .from('pig_records')
+          .select('*')
+          .eq('id', args.where.id)
+          .maybeSingle();
+        if (error) throw error;
+        return data ? rowToPig(data) : null;
+      },
+      findFirst: async (args?: any) => {
+        let query = supabaseServerAdmin.from('pig_records').select('*').limit(1);
+        if (args?.where?.id) {
+          query = query.eq('id', args.where.id);
+        }
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        return data ? rowToPig(data) : null;
       },
       upsert: async (args: any) => {
         const payload = args.create || args.update;
@@ -79,6 +101,24 @@ export class PrismaClientEngine {
           .order('full_name', { ascending: true });
         if (error) throw error;
         return (data || []).map(rowToUser);
+      },
+      findUnique: async (args: { where: { username: string } }) => {
+        const { data, error } = await supabaseServerAdmin
+          .from('users')
+          .select('*')
+          .eq('username', args.where.username)
+          .maybeSingle();
+        if (error) throw error;
+        return data ? rowToUser(data) : null;
+      },
+      findFirst: async (args?: any) => {
+        let query = supabaseServerAdmin.from('users').select('*').limit(1);
+        if (args?.where?.username) {
+          query = query.eq('username', args.where.username);
+        }
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        return data ? rowToUser(data) : null;
       },
       upsert: async (args: any) => {
         const payload = args.create || args.update;

@@ -2,6 +2,14 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma, supabaseServerAdmin } from '../db/prisma';
 import { rowToPig, pigToRow } from '../../services/supabaseClient';
+import { PigRecord } from '../../types';
+import { 
+  validatePigByPurpose, 
+  calculateBiosecurityScore, 
+  determineAsfRiskLevel, 
+  evaluatePcicEligibility, 
+  extractPreciseGpsCoordinates 
+} from '../../config/systemLogic';
 
 export const swineRouter = Router();
 
@@ -36,9 +44,59 @@ const PigSchema = z.object({
   mortalityReason: z.string().optional(),
   headCount: z.number().optional().default(1),
   biosecurityLevel: z.number().optional().default(1),
+  housingType: z.string().optional(),
+  feedingType: z.string().optional(),
+  wasteManagement: z.string().optional(),
+  asfRiskLevel: z.string().optional(),
+  biosecurityScore: z.number().optional(),
+  pcicEligible: z.boolean().optional(),
 });
 
 const BatchPigSchema = z.array(PigSchema);
+
+async function recordAuditLog(log: {
+  username: string;
+  userFullName?: string;
+  role?: string;
+  action: string;
+  details: string;
+  entityType: string;
+  barangay?: string | null;
+  ipAddress?: string;
+}) {
+  const auditId = `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  try {
+    await prisma.auditLog.create({
+      data: {
+        id: auditId,
+        username: log.username,
+        userFullName: log.userFullName || log.username,
+        role: log.role || 'user',
+        action: log.action,
+        details: log.details,
+        entityType: log.entityType,
+        barangay: log.barangay || null,
+        ipAddress: log.ipAddress || '127.0.0.1',
+      },
+    });
+  } catch (prismaErr) {
+    try {
+      await supabaseServerAdmin.from('audit_logs').insert([{
+        id: auditId,
+        username: log.username,
+        user_full_name: log.userFullName || log.username,
+        role: log.role || 'user',
+        action: log.action,
+        details: log.details,
+        entity_type: log.entityType,
+        barangay: log.barangay || null,
+        ip_address: log.ipAddress || '127.0.0.1',
+      }]);
+    } catch {
+      // Non-blocking log catch
+    }
+  }
+}
 
 /**
  * GET /api/swine
@@ -100,75 +158,128 @@ swineRouter.get('/', async (req: Request, res: Response, next: NextFunction) => 
 
 /**
  * POST /api/swine
- * Create or upsert a single swine record with Zod payload validation
+ * Create or upsert a single swine record with Zod payload validation & purpose-driven rules
  */
 swineRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const validated = PigSchema.parse(req.body);
+
+    // Purpose-specific schema and business logic validation
+    const candidatePig = validated as unknown as Partial<PigRecord>;
+    const purposeValidation = validatePigByPurpose(candidatePig);
+    if (!purposeValidation.isValid) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Purpose validation failed for '${validated.purpose}': ${purposeValidation.errors.join(' ')}`,
+        errors: purposeValidation.errors,
+        missingFields: purposeValidation.missingFields,
+      });
+    }
+
+    // Calculate system logic outputs: biosecurity, ASF risk, PCIC eligibility, precise GPS
+    const bioScore = calculateBiosecurityScore(validated.biosecurity);
+    const asfRisk = determineAsfRiskLevel(candidatePig);
+    const pcicEval = evaluatePcicEligibility(candidatePig);
+    const coords = extractPreciseGpsCoordinates(candidatePig);
+
+    const biosecurityPayload = {
+      ...(typeof validated.biosecurity === 'object' && validated.biosecurity !== null ? validated.biosecurity : {}),
+      score: bioScore.score,
+      maxScore: bioScore.maxScore,
+      isCompliant: bioScore.isCompliant,
+      isSwillViolation: bioScore.isSwillViolation,
+      asfRiskLevel: asfRisk.level,
+      asfRiskCode: asfRisk.code,
+      pcicEligible: pcicEval.isEligible,
+      housingType: validated.housingType || (validated.biosecurity as any)?.housingType,
+      feedingType: validated.feedingType || (validated.biosecurity as any)?.feedingType,
+      wasteManagement: validated.wasteManagement || (validated.biosecurity as any)?.wasteManagement,
+    };
+
+    const enrichedRecord = {
+      ...validated,
+      lat: coords.lat,
+      lng: coords.lng,
+      biosecurity: biosecurityPayload,
+      biosecurityLevel: bioScore.score,
+      biosecurityScore: bioScore.score,
+      asfRiskLevel: asfRisk.level,
+      pcicEligible: pcicEval.isEligible,
+    };
 
     try {
       // Prisma Upsert
       const record = await prisma.pigRecord.upsert({
         where: { id: validated.id },
         update: {
-          earTag: validated.earTag,
-          ownerName: validated.ownerName,
-          contact: validated.contact,
-          address: validated.address,
-          barangay: validated.barangay,
-          breed: validated.breed,
-          sex: validated.sex,
-          age: validated.age,
-          weight: validated.weight,
-          purpose: validated.purpose,
-          vaccinated: validated.vaccinated,
-          asfCleared: validated.asfCleared,
-          lat: validated.lat,
-          lng: validated.lng,
-          gpsAccuracy: validated.gpsAccuracy,
-          gpsAltitude: validated.gpsAltitude,
-          gpsTimestamp: validated.gpsTimestamp,
-          registeredBy: validated.registeredBy,
-          notes: validated.notes,
-          biosecurity: validated.biosecurity ? validated.biosecurity : undefined,
-          photoUrl: validated.photoUrl,
-          healthStatus: validated.healthStatus,
-          isDeceased: validated.isDeceased,
-          mortalityDate: validated.mortalityDate,
-          mortalityReason: validated.mortalityReason,
-          headCount: validated.headCount,
-          biosecurityLevel: validated.biosecurityLevel,
+          earTag: enrichedRecord.earTag,
+          ownerName: enrichedRecord.ownerName,
+          contact: enrichedRecord.contact,
+          address: enrichedRecord.address,
+          barangay: enrichedRecord.barangay,
+          breed: enrichedRecord.breed,
+          sex: enrichedRecord.sex,
+          age: enrichedRecord.age,
+          weight: enrichedRecord.weight,
+          purpose: enrichedRecord.purpose,
+          vaccinated: enrichedRecord.vaccinated,
+          asfCleared: enrichedRecord.asfCleared,
+          lat: enrichedRecord.lat,
+          lng: enrichedRecord.lng,
+          gpsAccuracy: enrichedRecord.gpsAccuracy,
+          gpsAltitude: enrichedRecord.gpsAltitude,
+          gpsTimestamp: enrichedRecord.gpsTimestamp,
+          registeredBy: enrichedRecord.registeredBy,
+          notes: enrichedRecord.notes,
+          biosecurity: biosecurityPayload as any,
+          photoUrl: enrichedRecord.photoUrl,
+          healthStatus: enrichedRecord.healthStatus,
+          isDeceased: enrichedRecord.isDeceased,
+          mortalityDate: enrichedRecord.mortalityDate,
+          mortalityReason: enrichedRecord.mortalityReason,
+          headCount: enrichedRecord.headCount,
+          biosecurityLevel: bioScore.score,
         },
         create: {
-          id: validated.id,
-          earTag: validated.earTag,
-          ownerName: validated.ownerName,
-          contact: validated.contact,
-          address: validated.address,
-          barangay: validated.barangay,
-          breed: validated.breed,
-          sex: validated.sex,
-          age: validated.age,
-          weight: validated.weight,
-          purpose: validated.purpose,
-          vaccinated: validated.vaccinated,
-          asfCleared: validated.asfCleared,
-          lat: validated.lat,
-          lng: validated.lng,
-          gpsAccuracy: validated.gpsAccuracy,
-          gpsAltitude: validated.gpsAltitude,
-          gpsTimestamp: validated.gpsTimestamp,
-          registeredBy: validated.registeredBy,
-          notes: validated.notes,
-          biosecurity: validated.biosecurity ? validated.biosecurity : undefined,
-          photoUrl: validated.photoUrl,
-          healthStatus: validated.healthStatus,
-          isDeceased: validated.isDeceased,
-          mortalityDate: validated.mortalityDate,
-          mortalityReason: validated.mortalityReason,
-          headCount: validated.headCount,
-          biosecurityLevel: validated.biosecurityLevel,
+          id: enrichedRecord.id,
+          earTag: enrichedRecord.earTag,
+          ownerName: enrichedRecord.ownerName,
+          contact: enrichedRecord.contact,
+          address: enrichedRecord.address,
+          barangay: enrichedRecord.barangay,
+          breed: enrichedRecord.breed,
+          sex: enrichedRecord.sex,
+          age: enrichedRecord.age,
+          weight: enrichedRecord.weight,
+          purpose: enrichedRecord.purpose,
+          vaccinated: enrichedRecord.vaccinated,
+          asfCleared: enrichedRecord.asfCleared,
+          lat: enrichedRecord.lat,
+          lng: enrichedRecord.lng,
+          gpsAccuracy: enrichedRecord.gpsAccuracy,
+          gpsAltitude: enrichedRecord.gpsAltitude,
+          gpsTimestamp: enrichedRecord.gpsTimestamp,
+          registeredBy: enrichedRecord.registeredBy,
+          notes: enrichedRecord.notes,
+          biosecurity: biosecurityPayload as any,
+          photoUrl: enrichedRecord.photoUrl,
+          healthStatus: enrichedRecord.healthStatus,
+          isDeceased: enrichedRecord.isDeceased,
+          mortalityDate: enrichedRecord.mortalityDate,
+          mortalityReason: enrichedRecord.mortalityReason,
+          headCount: enrichedRecord.headCount,
+          biosecurityLevel: bioScore.score,
         },
+      });
+
+      // Non-blocking Audit Logging
+      await recordAuditLog({
+        username: enrichedRecord.registeredBy || 'focal_person',
+        action: 'REGISTER_OR_UPDATE_SWINE',
+        details: `Saved swine record ${enrichedRecord.earTag} (${enrichedRecord.ownerName}, Brgy: ${enrichedRecord.barangay}, Purpose: ${enrichedRecord.purpose}, PCIC: ${pcicEval.isEligible ? 'Eligible' : 'Not Eligible'}, Bio: ${bioScore.score}/7)`,
+        entityType: 'pig',
+        barangay: enrichedRecord.barangay,
+        ipAddress: req.ip || '127.0.0.1',
       });
 
       return res.status(201).json({
@@ -179,14 +290,23 @@ swineRouter.post('/', async (req: Request, res: Response, next: NextFunction) =>
     } catch (prismaErr) {
       console.warn('[Prisma API Save Warning] Falling back to Supabase client:', prismaErr);
 
-      const row = pigToRow(validated as any);
+      const row = pigToRow(enrichedRecord as any);
       const { error } = await supabaseServerAdmin.from('pig_records').upsert(row, { onConflict: 'id' });
       if (error) throw error;
+
+      await recordAuditLog({
+        username: enrichedRecord.registeredBy || 'focal_person',
+        action: 'REGISTER_OR_UPDATE_SWINE',
+        details: `Saved swine record ${enrichedRecord.earTag} (${enrichedRecord.ownerName}, Brgy: ${enrichedRecord.barangay}, Purpose: ${enrichedRecord.purpose}, Bio: ${bioScore.score}/7)`,
+        entityType: 'pig',
+        barangay: enrichedRecord.barangay,
+        ipAddress: req.ip || '127.0.0.1',
+      });
 
       return res.status(201).json({
         status: 'success',
         source: 'supabase',
-        data: validated,
+        data: enrichedRecord,
       });
     }
   } catch (err) {
@@ -202,9 +322,39 @@ swineRouter.post('/batch', async (req: Request, res: Response, next: NextFunctio
   try {
     const validatedArray = BatchPigSchema.parse(req.body);
 
+    const enrichedArray = validatedArray.map(item => {
+      const candidateItem = item as unknown as Partial<PigRecord>;
+      const bioScore = calculateBiosecurityScore(item.biosecurity);
+      const asfRisk = determineAsfRiskLevel(candidateItem);
+      const pcicEval = evaluatePcicEligibility(candidateItem);
+      const coords = extractPreciseGpsCoordinates(candidateItem);
+
+      const biosecurityPayload = {
+        ...(typeof item.biosecurity === 'object' && item.biosecurity !== null ? item.biosecurity : {}),
+        score: bioScore.score,
+        maxScore: bioScore.maxScore,
+        isCompliant: bioScore.isCompliant,
+        isSwillViolation: bioScore.isSwillViolation,
+        asfRiskLevel: asfRisk.level,
+        asfRiskCode: asfRisk.code,
+        pcicEligible: pcicEval.isEligible,
+        housingType: item.housingType || (item.biosecurity as any)?.housingType,
+        feedingType: item.feedingType || (item.biosecurity as any)?.feedingType,
+        wasteManagement: item.wasteManagement || (item.biosecurity as any)?.wasteManagement,
+      };
+
+      return {
+        ...item,
+        lat: coords.lat,
+        lng: coords.lng,
+        biosecurity: biosecurityPayload,
+        biosecurityLevel: bioScore.score,
+      };
+    });
+
     try {
       const results = await Promise.all(
-        validatedArray.map(item =>
+        enrichedArray.map(item =>
           prisma.pigRecord.upsert({
             where: { id: item.id },
             update: {
@@ -260,6 +410,14 @@ swineRouter.post('/batch', async (req: Request, res: Response, next: NextFunctio
         )
       );
 
+      await recordAuditLog({
+        username: 'focal_batch_sync',
+        action: 'BATCH_SYNC_SWINE',
+        details: `Batch synced ${results.length} swine records to primary database`,
+        entityType: 'pig',
+        ipAddress: req.ip || '127.0.0.1',
+      });
+
       return res.json({
         status: 'success',
         source: 'prisma',
@@ -268,9 +426,17 @@ swineRouter.post('/batch', async (req: Request, res: Response, next: NextFunctio
     } catch (prismaErr) {
       console.warn('[Prisma Batch Warning] Falling back to Supabase client:', prismaErr);
 
-      const rows = validatedArray.map(item => pigToRow(item as any));
+      const rows = enrichedArray.map(item => pigToRow(item as any));
       const { error } = await supabaseServerAdmin.from('pig_records').upsert(rows, { onConflict: 'id' });
       if (error) throw error;
+
+      await recordAuditLog({
+        username: 'focal_batch_sync',
+        action: 'BATCH_SYNC_SWINE',
+        details: `Batch synced ${rows.length} swine records to Supabase storage`,
+        entityType: 'pig',
+        ipAddress: req.ip || '127.0.0.1',
+      });
 
       return res.json({
         status: 'success',
@@ -292,11 +458,31 @@ swineRouter.delete('/:id', async (req: Request, res: Response, next: NextFunctio
     const { id } = req.params;
 
     try {
+      const existing = await prisma.pigRecord.findUnique({ where: { id } });
       await prisma.pigRecord.delete({ where: { id } });
+
+      await recordAuditLog({
+        username: existing?.registeredBy || 'focal_person',
+        action: 'DELETE_SWINE',
+        details: `Deleted swine record ${existing?.earTag || id} (${existing?.ownerName || 'Unknown Owner'}, Brgy: ${existing?.barangay || 'Central'})`,
+        entityType: 'pig',
+        barangay: existing?.barangay,
+        ipAddress: req.ip || '127.0.0.1',
+      });
+
       return res.json({ status: 'success', message: 'Record deleted successfully' });
     } catch (prismaErr) {
       const { error } = await supabaseServerAdmin.from('pig_records').delete().eq('id', id);
       if (error) throw error;
+
+      await recordAuditLog({
+        username: 'focal_person',
+        action: 'DELETE_SWINE',
+        details: `Deleted swine record ${id} via direct client`,
+        entityType: 'pig',
+        ipAddress: req.ip || '127.0.0.1',
+      });
+
       return res.json({ status: 'success', message: 'Record deleted successfully' });
     }
   } catch (err) {

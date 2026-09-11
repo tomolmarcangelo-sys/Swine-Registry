@@ -28,6 +28,14 @@ import { GisFormMap } from './GisFormMap';
 import { uploadImageToSupabase } from '../services/supabaseClient';
 import { useI18n } from '../i18n/I18nContext';
 import { getSimulateOffline } from '../services/syncService';
+import {
+  SYSTEM_LOGIC,
+  getPurposeDefinition,
+  calculateBiosecurityScore,
+  determineAsfRiskLevel,
+  evaluatePcicEligibility,
+  validatePigByPurpose
+} from '../config/systemLogic';
 
 interface AddEditRecordModalProps {
   isOpen: boolean;
@@ -92,6 +100,13 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
   const [isDeceased, setIsDeceased] = useState(editingPig?.isDeceased ?? false);
   const [mortalityDate, setMortalityDate] = useState(editingPig?.mortalityDate || new Date().toISOString().slice(0, 10));
   const [mortalityReason, setMortalityReason] = useState(editingPig?.mortalityReason || 'Suspected ASF Outbreak');
+
+  // Purpose-Driven Farm Practices & Lifecycle State
+  const [headCount, setHeadCount] = useState<string>(editingPig?.headCount ? String(editingPig.headCount) : '1');
+  const [housingType, setHousingType] = useState<string>(editingPig?.housingType || (editingPig?.biosecurity as any)?.housingType || 'Elevated Slatted Flooring');
+  const [feedingType, setFeedingType] = useState<string>(editingPig?.feedingType || (editingPig?.biosecurity as any)?.feedingType || 'Commercial Pellets & Concentrates');
+  const [wasteManagement, setWasteManagement] = useState<string>(editingPig?.wasteManagement || (editingPig?.biosecurity as any)?.wasteManagement || 'Septic Tank / Containment Pit');
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   // Camera Access, Live Viewfinder & Capture States
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -291,6 +306,11 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
       setIsDeceased(editingPig.isDeceased ?? false);
       setMortalityDate(editingPig.mortalityDate || new Date().toISOString().slice(0, 10));
       setMortalityReason(editingPig.mortalityReason || 'Suspected ASF Outbreak');
+      setHeadCount(String(editingPig.headCount ?? '1'));
+      setHousingType(editingPig.housingType || (editingPig.biosecurity as any)?.housingType || 'Elevated Slatted Flooring');
+      setFeedingType(editingPig.feedingType || (editingPig.biosecurity as any)?.feedingType || 'Commercial Pellets & Concentrates');
+      setWasteManagement(editingPig.wasteManagement || (editingPig.biosecurity as any)?.wasteManagement || 'Septic Tank / Containment Pit');
+      setValidationErrors([]);
     } else {
       const defBrgy = initialCoords?.barangay || (isAdmin ? 'Poblacion' : currentUser.barangay || 'Poblacion');
       const brgyCode = defBrgy.slice(0, 3).toUpperCase();
@@ -318,6 +338,11 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
       setIsDeceased(false);
       setMortalityDate(new Date().toISOString().slice(0, 10));
       setMortalityReason('Suspected ASF Outbreak');
+      setHeadCount('1');
+      setHousingType('Elevated Slatted Flooring');
+      setFeedingType('Commercial Pellets & Concentrates');
+      setWasteManagement('Septic Tank / Containment Pit');
+      setValidationErrors([]);
     }
   }, [editingPig, defaultBarangay, initialCoords, isAdmin, currentUser.barangay, existingPigs]);
 
@@ -456,6 +481,32 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
     biosecurityLevelColor = 'text-[#2F5C3F] bg-[#F5EFDD] border-[#DED2AE]';
   }
 
+  // Purpose-Driven Real-time Intelligence & Computations
+  const currentPurposeDef = getPurposeDefinition(purpose);
+  const liveCandidateRecord: Partial<PigRecord> = {
+    earTag,
+    ownerName,
+    barangay,
+    breed,
+    sex,
+    age: Number(age) || 0,
+    weight: Number(weight) || 0,
+    purpose,
+    vaccinated,
+    asfCleared,
+    lat: Number(lat) || 0,
+    lng: Number(lng) || 0,
+    biosecurity,
+    headCount: Number(headCount) || 1,
+    housingType,
+    feedingType,
+    wasteManagement,
+  };
+  const liveBioEval = calculateBiosecurityScore(biosecurity);
+  const liveAsfRisk = determineAsfRiskLevel(liveCandidateRecord);
+  const livePcic = evaluatePcicEligibility(liveCandidateRecord);
+  const livePurposeCheck = validatePigByPurpose(liveCandidateRecord);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -485,21 +536,14 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
       hasValidationError = true;
     }
 
-    if (hasValidationError) {
-      // Find the first field with an error and scroll into view or just block submit
-      const errorSection = document.getElementById('toast-root');
-      if (errorSection) {
-        errorSection.scrollIntoView({ behavior: 'smooth' });
-      }
-      return;
-    }
-
     const numLat = Number(lat) || 10.3969;
     const numLng = Number(lng) || 125.1999;
+    const numHeadCount = Math.max(1, parseInt(headCount, 10) || 1);
+    const bioScore = calculateBiosecurityScore(biosecurity);
 
     const record: PigRecord = {
       id: editingPig?.id || `REC-${Date.now()}`,
-      earTag: earTag.trim(),
+      earTag: trimmedEarTag,
       ownerName: ownerName.trim(),
       contact: contact.trim(),
       address: address.trim(),
@@ -517,12 +561,45 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
       gpsAccuracy,
       registeredBy: currentUser.username,
       notes: notes.trim(),
-      biosecurity,
+      biosecurity: {
+        ...biosecurity,
+        score: bioScore.score,
+        housingType,
+        feedingType,
+        wasteManagement,
+        asfRiskLevel: liveAsfRisk.level,
+        pcicEligible: livePcic.isEligible
+      },
       photoUrl,
       isDeceased,
       mortalityDate: isDeceased ? mortalityDate : undefined,
-      mortalityReason: isDeceased ? mortalityReason : undefined
+      mortalityReason: isDeceased ? mortalityReason : undefined,
+      headCount: numHeadCount,
+      housingType,
+      feedingType,
+      wasteManagement,
+      biosecurityScore: bioScore.score,
+      biosecurityLevel: bioScore.score,
+      asfRiskLevel: liveAsfRisk.level,
+      pcicEligible: livePcic.isEligible,
     };
+
+    // Evaluate Purpose-Driven Business Logic
+    const purposeValidation = validatePigByPurpose(record);
+    if (!purposeValidation.isValid) {
+      setValidationErrors(purposeValidation.errors);
+      hasValidationError = true;
+    } else {
+      setValidationErrors([]);
+    }
+
+    if (hasValidationError) {
+      const modalTop = document.getElementById('modal-scroll-top');
+      if (modalTop) {
+        modalTop.scrollIntoView({ behavior: 'smooth' });
+      }
+      return;
+    }
 
     onSave(record);
     handleClose();
@@ -563,6 +640,23 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
 
         {/* MODAL BODY FORM */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6 text-[#1E2B1F]">
+          <div id="modal-scroll-top" />
+
+          {/* Business Logic & Purpose Validation Banner */}
+          {validationErrors.length > 0 && (
+            <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-950 flex items-start gap-3 shadow-xs">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="flex-1 space-y-1">
+                <div className="font-bold text-rose-900 text-sm">Regulatory Compliance & Purpose Validation Error</div>
+                <ul className="list-disc pl-4 space-y-0.5 text-xs text-rose-800">
+                  {validationErrors.map((err, idx) => (
+                    <li key={idx}>{err}</li>
+                  ))}
+                </ul>
+                <p className="text-[11px] text-rose-700 mt-1">Please adjust the fields below in accordance with DA-BAI Hinunangan livestock standards.</p>
+              </div>
+            </div>
+          )}
           
           {/* Connection Status Banner */}
           {!isOnline ? (
@@ -980,12 +1074,170 @@ export const AddEditRecordModal: React.FC<AddEditRecordModalProps> = ({
                 <select
                   value={purpose}
                   onChange={(e) => setPurpose(e.target.value as PurposeType)}
-                  className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2.5 text-sm text-[#1E2B1F] focus:border-[#2F5C3F] focus:bg-white outline-none"
+                  className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2.5 text-sm text-[#1E2B1F] focus:border-[#2F5C3F] focus:bg-white outline-none font-medium"
                 >
                   {PURPOSES.map(p => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-[#55604F] mb-1">
+                  Head Count (Herd Size) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="1000"
+                  required
+                  value={headCount}
+                  onChange={(e) => setHeadCount(e.target.value)}
+                  className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3.5 py-2.5 text-sm text-[#1E2B1F] focus:border-[#2F5C3F] focus:bg-white outline-none font-mono font-medium"
+                />
+              </div>
+            </div>
+
+            {/* Purpose-Driven Regulatory & PCIC Intelligence Panel */}
+            <div className="mt-3.5 bg-linear-to-br from-[#FAF7EE] to-[#F3ECD6] border border-[#DED2AE] rounded-2xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#E3D8BA] pb-2.5">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold font-mono tracking-wider uppercase text-[#2F5C3F]">
+                      DA Regulatory Specification
+                    </span>
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[#2F5C3F]/10 text-[#2F5C3F]">
+                      {currentPurposeDef.label || currentPurposeDef.purposeKey}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#55604F] mt-0.5">
+                    {currentPurposeDef.description || 'Monitored under DA-BAI swine program'}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-[11px] font-mono text-[#788471] block">Max Scale Cap</span>
+                  <span className="text-xs font-bold text-[#1E2B1F] font-mono">
+                    {currentPurposeDef.maxRecommendedHeads && currentPurposeDef.maxRecommendedHeads < 999 
+                      ? `≤ ${currentPurposeDef.maxRecommendedHeads} heads` 
+                      : 'Commercial Scale'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Real-time Risk & PCIC Eligibility Badges */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                {/* Live ASF Risk Status */}
+                <div className="bg-white/80 border border-[#E3D8BA] rounded-xl p-3 flex items-start gap-2.5">
+                  <div className={`p-1.5 rounded-lg shrink-0 ${
+                    liveAsfRisk.level === 'Green' ? 'bg-emerald-100 text-emerald-800' :
+                    liveAsfRisk.level === 'Yellow' ? 'bg-amber-100 text-amber-800' :
+                    liveAsfRisk.level === 'Pink' ? 'bg-rose-100 text-rose-800' :
+                    'bg-red-100 text-red-900'
+                  }`}>
+                    <ShieldAlert className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-[#1E2B1F]">ASF Zone Evaluation</span>
+                      <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded-full ${
+                        liveAsfRisk.level === 'Green' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                        liveAsfRisk.level === 'Yellow' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
+                        'bg-rose-100 text-rose-800 border border-rose-300'
+                      }`}>
+                        {liveAsfRisk.level.toUpperCase()} ZONE
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#55604F] mt-1 leading-snug">
+                      {liveAsfRisk.reason}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Live PCIC Eligibility Status */}
+                <div className="bg-white/80 border border-[#E3D8BA] rounded-xl p-3 flex items-start gap-2.5">
+                  <div className={`p-1.5 rounded-lg shrink-0 ${
+                    livePcic.isEligible ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {livePcic.isEligible ? <ShieldCheck className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-[#1E2B1F]">PCIC Insurance Status</span>
+                      <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded-full ${
+                        livePcic.isEligible 
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                          : 'bg-amber-100 text-amber-900 border border-amber-300'
+                      }`}>
+                        {livePcic.isEligible ? 'COVERED' : 'INELIGIBLE'}
+                      </span>
+                    </div>
+                    {livePcic.isEligible ? (
+                      <p className="text-[11px] text-emerald-800 mt-1 font-medium leading-snug">
+                        Eligible for PCIC Municipal Swine Insurance (100% Gov't Subsidy)
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-amber-900 mt-1 leading-snug">
+                        {livePcic.failedCriteria[0] || livePcic.reasons[0] || 'Must satisfy DA biosecurity and health thresholds'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Farm Practices & Containment Infrastructure */}
+            <div className="mt-3.5 pt-3 border-t border-[#EAE1C4]">
+              <span className="text-xs font-mono font-bold uppercase text-[#55604F] tracking-wider block mb-2">
+                Husbandry Practices & Biosecurity Infrastructure
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-[#55604F] mb-1">
+                    Housing Facility *
+                  </label>
+                  <select
+                    value={housingType}
+                    onChange={(e) => setHousingType(e.target.value)}
+                    className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3 py-2 text-xs text-[#1E2B1F] focus:border-[#2F5C3F] focus:bg-white outline-none font-medium"
+                  >
+                    <option value="Elevated Slatted Flooring">Elevated Slatted Flooring</option>
+                    <option value="Concrete Flooring with Pen Run">Concrete Flooring with Pen Run</option>
+                    <option value="Deep Bedding / Natural Piggery">Deep Bedding / Natural Piggery</option>
+                    <option value="Open Yard / Dirt Pen (DA Not Recommended)">Open Yard / Dirt Pen (DA Not Recommended)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#55604F] mb-1">
+                    Feeding Practice *
+                  </label>
+                  <select
+                    value={feedingType}
+                    onChange={(e) => setFeedingType(e.target.value)}
+                    className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3 py-2 text-xs text-[#1E2B1F] focus:border-[#2F5C3F] focus:bg-white outline-none font-medium"
+                  >
+                    <option value="Commercial Pellets & Concentrates">Commercial Pellets & Concentrates</option>
+                    <option value="Cooked Crop By-Products & Rice Bran">Cooked Crop By-Products & Rice Bran</option>
+                    <option value="Mixed Forage & Commercial Feed">Mixed Forage & Commercial Feed</option>
+                    <option value="Swill / Food Scraps (DA Strictly Banned)">Swill / Food Scraps (DA Strictly Banned)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#55604F] mb-1">
+                    Waste Management *
+                  </label>
+                  <select
+                    value={wasteManagement}
+                    onChange={(e) => setWasteManagement(e.target.value)}
+                    className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3 py-2 text-xs text-[#1E2B1F] focus:border-[#2F5C3F] focus:bg-white outline-none font-medium"
+                  >
+                    <option value="Septic Tank / Containment Pit">Septic Tank / Containment Pit</option>
+                    <option value="Biogas Digester System">Biogas Digester System</option>
+                    <option value="Composting Pit">Composting Pit</option>
+                    <option value="Direct Drainage / Lagoon">Direct Drainage / Lagoon</option>
+                  </select>
+                </div>
               </div>
             </div>
 

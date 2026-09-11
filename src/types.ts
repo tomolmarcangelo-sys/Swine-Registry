@@ -4,7 +4,8 @@ export type PurposeType =
   | 'Backyard Raising' 
   | 'Breeding Stock' 
   | 'Fattening/Commercial' 
-  | 'Piggery';
+  | 'Piggery'
+  | 'Commercial Breeding';
 
 export type BreedType = 
   | 'Native / Native-cross' 
@@ -22,6 +23,15 @@ export interface BiosecurityAssessment {
   visitorLogControl: boolean;        // Visitor & vehicle access restriction with sanitation
   quarantineIsolationPen: boolean;   // Separate isolation / quarantine pen for new or sick animals
   cleanWaterSource: boolean;         // Enclosed clean/potable water supply
+  score?: number;
+  maxScore?: number;
+  isCompliant?: boolean;
+  housingType?: string;
+  feedingType?: string;
+  wasteManagement?: string;
+  asfRiskLevel?: string;
+  pcicEligible?: boolean;
+  [key: string]: any;
 }
 
 export interface User {
@@ -71,6 +81,12 @@ export interface PigRecord {
   healthStatus?: 'Healthy' | 'Suspect' | 'Quarantined' | 'Deceased' | string;
   headCount?: number;
   biosecurityLevel?: number;
+  housingType?: string;
+  feedingType?: string;
+  wasteManagement?: string;
+  asfRiskLevel?: string;
+  biosecurityScore?: number;
+  pcicEligible?: boolean;
 }
 
 export interface SystemSettings {

@@ -1,4 +1,5 @@
 import { PigRecord, User, AuditLogItem } from '../types';
+import { validatePigByPurpose } from '../config/systemLogic';
 import {
   fetchPigsFromSupabase,
   savePigToSupabase,
@@ -12,6 +13,13 @@ import {
 
 // Base API URL configuration
 const API_BASE_URL = typeof window !== 'undefined' ? '' : 'http://localhost:3000';
+
+/**
+ * Validates a pig record against purpose rules before submission
+ */
+export function validateClientPigRecord(pig: Partial<PigRecord>) {
+  return validatePigByPurpose(pig);
+}
 
 /**
  * Fetch all pigs via server API (/api/swine) with fallback

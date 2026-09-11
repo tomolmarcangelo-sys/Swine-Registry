@@ -62,6 +62,12 @@ export function pigToRow(pig: PigRecord) {
     mortality_reason: pig.mortalityReason || null,
     head_count: pig.headCount || 1,
     biosecurity_level: pig.biosecurityLevel || (pig.biosecurity ? Object.values(pig.biosecurity).filter(Boolean).length : 1),
+    housing_type: (pig as any).housingType || (pig.biosecurity as any)?.housingType || null,
+    feeding_type: (pig as any).feedingType || (pig.biosecurity as any)?.feedingType || null,
+    waste_management: (pig as any).wasteManagement || (pig.biosecurity as any)?.wasteManagement || null,
+    asf_risk_level: (pig as any).asfRiskLevel || (pig.biosecurity as any)?.asfRiskLevel || null,
+    biosecurity_score: (pig as any).biosecurityScore || (pig.biosecurity as any)?.score || null,
+    pcic_eligible: (pig as any).pcicEligible !== undefined ? (pig as any).pcicEligible : (pig.biosecurity as any)?.pcicEligible,
     updated_at: new Date().toISOString()
   };
 }
@@ -114,7 +120,13 @@ export function rowToPig(row: any): PigRecord {
     mortalityDate: row.mortality_date ?? row.mortalityDate,
     mortalityReason: row.mortality_reason ?? row.mortalityReason,
     headCount: Number(row.head_count ?? row.headCount ?? 1),
-    biosecurityLevel: Number(row.biosecurity_level ?? row.biosecurityLevel ?? 1)
+    biosecurityLevel: Number(row.biosecurity_level ?? row.biosecurityLevel ?? 1),
+    housingType: row.housing_type ?? row.housingType ?? row.biosecurity?.housingType,
+    feedingType: row.feeding_type ?? row.feedingType ?? row.biosecurity?.feedingType,
+    wasteManagement: row.waste_management ?? row.wasteManagement ?? row.biosecurity?.wasteManagement,
+    asfRiskLevel: row.asf_risk_level ?? row.asfRiskLevel ?? row.biosecurity?.asfRiskLevel,
+    biosecurityScore: row.biosecurity_score ?? row.biosecurityScore ?? row.biosecurity?.score,
+    pcicEligible: row.pcic_eligible !== undefined ? Boolean(row.pcic_eligible) : (row.pcicEligible !== undefined ? Boolean(row.pcicEligible) : row.biosecurity?.pcicEligible)
   };
 }
 

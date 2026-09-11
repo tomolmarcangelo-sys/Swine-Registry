@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { Printer, FileText, Download, Check, MapPin, ShieldCheck, Building2 } from 'lucide-react';
 import { BARANGAYS_DATA } from '../data/constants';
 import { PigRecord, User } from '../types';
+import { 
+  calculateBiosecurityScore, 
+  determineAsfRiskLevel, 
+  evaluatePcicEligibility 
+} from '../config/systemLogic';
 
 interface PrintReportsViewProps {
   pigs: PigRecord[];
@@ -16,24 +21,30 @@ export const PrintReportsView: React.FC<PrintReportsViewProps> = ({
   const [selectedBarangay, setSelectedBarangay] = useState(
     isAdmin ? '' : currentUser.barangay || ''
   );
-  const [reportType, setReportType] = useState<'census' | 'asf' | 'vaccination'>('census');
+  const [reportType, setReportType] = useState<'census' | 'asf' | 'vaccination' | 'pcic'>('census');
 
   const scopedPigs = (pigs || []).filter(p => {
     if (!isAdmin && currentUser.barangay && p.barangay !== currentUser.barangay) {
       return false;
     }
     if (selectedBarangay && p.barangay !== selectedBarangay) return false;
-    if (reportType === 'asf' && !p.asfCleared) return false;
+    if (reportType === 'asf') {
+      const risk = determineAsfRiskLevel(p);
+      return risk.code === 'GREEN' || risk.code === 'YELLOW';
+    }
     if (reportType === 'vaccination' && !p.vaccinated) return false;
+    if (reportType === 'pcic') {
+      return evaluatePcicEligibility(p).isEligible;
+    }
     return true;
   }).sort((a, b) => a.barangay.localeCompare(b.barangay) || a.ownerName.localeCompare(b.ownerName));
 
-  const totalCount = scopedPigs.length;
+  const totalRegisteredRecords = scopedPigs.length;
+  const totalHeads = scopedPigs.reduce((sum, p) => sum + (p.headCount || 1), 0);
   const backyardCount = scopedPigs.filter(p => p.purpose === 'Backyard Raising').length;
-  const breedingCount = scopedPigs.filter(p => p.purpose === 'Breeding Stock').length;
-  const commercialCount = scopedPigs.filter(p => p.purpose === 'Fattening/Commercial').length;
-  const piggeryCount = scopedPigs.filter(p => p.purpose === 'Piggery').length;
+  const commercialCount = scopedPigs.filter(p => p.purpose === 'Fattening/Commercial' || p.purpose === 'Commercial Breeding').length;
   const vaxCount = scopedPigs.filter(p => p.vaccinated).length;
+  const pcicEligibleCount = scopedPigs.filter(p => evaluatePcicEligibility(p).isEligible).length;
 
   const handlePrint = () => {
     window.print();
@@ -100,8 +111,9 @@ export const PrintReportsView: React.FC<PrintReportsViewProps> = ({
               className="w-full bg-[#FBF8EF] border border-[#DED2AE] rounded-xl px-3 py-2 text-xs text-[#1E2B1F] focus:bg-white focus:border-[#2F5C3F] outline-none"
             >
               <option value="census">General Swine Census & GIS Registry</option>
-              <option value="asf">ASF Biosecurity & Surveillance Log</option>
+              <option value="asf">ASF Biosecurity & Surveillance Log (Green/Yellow Zones)</option>
               <option value="vaccination">Vaccination & Deworming Completed Records</option>
+              <option value="pcic">PCIC Free Livestock Insurance Qualified Registry</option>
             </select>
           </div>
         </div>
@@ -127,6 +139,8 @@ export const PrintReportsView: React.FC<PrintReportsViewProps> = ({
                 ? 'African Swine Fever (ASF) Biosecurity & Surveillance Registry' 
                 : reportType === 'vaccination'
                 ? 'Municipal Livestock Vaccination & Health Record Log'
+                : reportType === 'pcic'
+                ? 'Philippine Crop Insurance Corporation (PCIC) Free Insurance Roster'
                 : 'Official Swine Registration & GIS Location Census'}
             </h1>
             <p className="text-xs text-[#55604F] mt-1 font-mono">
@@ -136,30 +150,26 @@ export const PrintReportsView: React.FC<PrintReportsViewProps> = ({
         </div>
 
         {/* SUMMARY STATS BAR */}
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center text-xs bg-[#FBF8EF] border border-[#DED2AE] rounded-xl p-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs bg-[#FBF8EF] border border-[#DED2AE] rounded-xl p-3 mb-6">
           <div className="p-1">
-            <span className="text-[10px] text-[#55604F] uppercase block">Total Heads</span>
-            <span className="font-mono font-bold text-sm text-[#203F2B]">{totalCount}</span>
+            <span className="text-[10px] text-[#55604F] uppercase block">Total Swine Heads</span>
+            <span className="font-mono font-bold text-sm text-[#203F2B]">{totalHeads}</span>
           </div>
           <div className="p-1">
-            <span className="text-[10px] text-[#55604F] uppercase block">Backyard</span>
+            <span className="text-[10px] text-[#55604F] uppercase block">Farm Records</span>
+            <span className="font-mono font-bold text-sm text-[#203F2B]">{totalRegisteredRecords}</span>
+          </div>
+          <div className="p-1">
+            <span className="text-[10px] text-[#55604F] uppercase block">Backyard Raising</span>
             <span className="font-mono font-bold text-sm text-[#203F2B]">{backyardCount}</span>
-          </div>
-          <div className="p-1">
-            <span className="text-[10px] text-[#55604F] uppercase block">Breeding</span>
-            <span className="font-mono font-bold text-sm text-[#203F2B]">{breedingCount}</span>
-          </div>
-          <div className="p-1">
-            <span className="text-[10px] text-[#55604F] uppercase block">Commercial</span>
-            <span className="font-mono font-bold text-sm text-[#203F2B]">{commercialCount}</span>
-          </div>
-          <div className="p-1">
-            <span className="text-[10px] text-[#55604F] uppercase block">Piggery</span>
-            <span className="font-mono font-bold text-sm text-[#203F2B]">{piggeryCount}</span>
           </div>
           <div className="p-1">
             <span className="text-[10px] text-[#55604F] uppercase block">Vaccinated</span>
             <span className="font-mono font-bold text-sm text-emerald-800">{vaxCount}</span>
+          </div>
+          <div className="p-1">
+            <span className="text-[10px] text-[#55604F] uppercase block">PCIC Eligible</span>
+            <span className="font-mono font-bold text-sm text-teal-800">{pcicEligibleCount}</span>
           </div>
         </div>
 
@@ -171,49 +181,64 @@ export const PrintReportsView: React.FC<PrintReportsViewProps> = ({
                 <th className="p-2 border border-[#DED2AE]">Ear Tag</th>
                 <th className="p-2 border border-[#DED2AE]">Owner Name</th>
                 <th className="p-2 border border-[#DED2AE]">Barangay / Address</th>
+                <th className="p-2 border border-[#DED2AE]">Heads</th>
                 <th className="p-2 border border-[#DED2AE]">Breed & Sex</th>
-                <th className="p-2 border border-[#DED2AE]">Weight (kg)</th>
                 <th className="p-2 border border-[#DED2AE]">Purpose</th>
-                <th className="p-2 border border-[#DED2AE]">Date Reg.</th>
+                <th className="p-2 border border-[#DED2AE]">Biosecurity / ASF</th>
+                <th className="p-2 border border-[#DED2AE]">PCIC Status</th>
                 <th className="p-2 border border-[#DED2AE]">GPS Coordinates</th>
               </tr>
             </thead>
             <tbody>
               {scopedPigs.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-6 text-center text-[#55604F] border border-[#DED2AE]">
+                  <td colSpan={9} className="p-6 text-center text-[#55604F] border border-[#DED2AE]">
                     No registrations on record for the selected scope.
                   </td>
                 </tr>
               ) : (
-                scopedPigs.map((pig, idx) => (
-                  <tr key={pig.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-[#FBF8EF]/60'}>
-                    <td className="p-2 border border-[#DED2AE] font-mono font-bold">
-                      {pig.earTag}
-                    </td>
-                    <td className="p-2 border border-[#DED2AE] font-semibold">
-                      {pig.ownerName}
-                    </td>
-                    <td className="p-2 border border-[#DED2AE]">
-                      {pig.barangay} - <span className="text-[10px] text-[#55604F]">{pig.address}</span>
-                    </td>
-                    <td className="p-2 border border-[#DED2AE]">
-                      {pig.breed} ({pig.sex.slice(0, 1)})
-                    </td>
-                    <td className="p-2 border border-[#DED2AE] font-mono">
-                      {pig.weight}
-                    </td>
-                    <td className="p-2 border border-[#DED2AE]">
-                      {pig.purpose}
-                    </td>
-                    <td className="p-2 border border-[#DED2AE] font-mono">
-                      {pig.dateRegistered}
-                    </td>
-                    <td className="p-2 border border-[#DED2AE] font-mono text-[10px]">
-                      {pig.lat.toFixed(4)}°, {pig.lng.toFixed(4)}°
-                    </td>
-                  </tr>
-                ))
+                scopedPigs.map((pig, idx) => {
+                  const bioEval = calculateBiosecurityScore(pig.biosecurity);
+                  const asfRisk = determineAsfRiskLevel(pig);
+                  const pcicEval = evaluatePcicEligibility(pig);
+                  const headCount = pig.headCount || 1;
+
+                  return (
+                    <tr key={pig.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-[#FBF8EF]/60'}>
+                      <td className="p-2 border border-[#DED2AE] font-mono font-bold">
+                        {pig.earTag}
+                      </td>
+                      <td className="p-2 border border-[#DED2AE] font-semibold">
+                        {pig.ownerName}
+                      </td>
+                      <td className="p-2 border border-[#DED2AE]">
+                        {pig.barangay} - <span className="text-[10px] text-[#55604F]">{pig.address}</span>
+                      </td>
+                      <td className="p-2 border border-[#DED2AE] font-mono font-bold text-center">
+                        {headCount}
+                      </td>
+                      <td className="p-2 border border-[#DED2AE]">
+                        {pig.breed} ({pig.sex.slice(0, 1)})
+                      </td>
+                      <td className="p-2 border border-[#DED2AE]">
+                        {pig.purpose}
+                      </td>
+                      <td className="p-2 border border-[#DED2AE] font-mono text-[10px]">
+                        <span className="font-bold">{bioEval.score}/7</span> · {asfRisk.level}
+                      </td>
+                      <td className="p-2 border border-[#DED2AE] text-[10px]">
+                        {pcicEval.isEligible ? (
+                          <span className="font-bold text-teal-800">Qualified</span>
+                        ) : (
+                          <span className="text-[#55604F]">Not eligible</span>
+                        )}
+                      </td>
+                      <td className="p-2 border border-[#DED2AE] font-mono text-[10px]">
+                        {pig.lat.toFixed(4)}°, {pig.lng.toFixed(4)}°
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

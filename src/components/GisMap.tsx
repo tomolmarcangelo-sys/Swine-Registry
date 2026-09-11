@@ -65,6 +65,12 @@ import {
 import { GeolocationHookReturn } from '../hooks/useGeolocation';
 import { BiosecurityAssessment, MapTileLayer, PigRecord, PurposeType, User } from '../types';
 import { useI18n } from '../i18n/I18nContext';
+import { 
+  calculateBiosecurityScore, 
+  determineAsfRiskLevel, 
+  evaluatePcicEligibility,
+  SYSTEM_LOGIC 
+} from '../config/systemLogic';
 
 export type HeatmapModeType = 'density' | 'sanitation';
 export type SanitationRiskFilter = 'all' | 'critical_only' | 'moderate_and_critical';
@@ -81,67 +87,36 @@ export interface PigBiosecurityEvaluation {
   missingPractices: string[];
 }
 
-// Biosecurity Scoring and Deficit Calculator
+// Biosecurity Scoring and Deficit Calculator delegating to centralized system logic engine
 export function evaluatePigBiosecurity(pig: PigRecord): PigBiosecurityEvaluation {
-  const bio = pig.biosecurity;
-  if (!bio) {
-    const baseScore = pig.asfCleared && pig.vaccinated ? 5 : (pig.asfCleared ? 3 : 1);
-    const deficit = 7 - baseScore;
-    const isCritical = baseScore <= 3;
-    return {
-      score: baseScore,
-      maxScore: 7,
-      percentage: Math.round((baseScore / 7) * 100),
-      deficit,
-      riskLevel: isCritical ? 'critical' : baseScore <= 5 ? 'moderate' : 'compliant',
-      riskWeight: isCritical ? 2.2 : (baseScore <= 5 ? 1.0 : 0.15),
-      isCriticalHotspot: isCritical,
-      isSwillViolation: false,
-      missingPractices: ['Unassessed Baseline Status']
-    };
-  }
-
-  const missing: string[] = [];
-  let score = 0;
-
-  if (bio.footbathMaintenance) score++; else missing.push('No Disinfectant Footbath');
-  if (bio.fencingIntegrity) score++; else missing.push('Compromised Perimeter Fence');
-  if (bio.swillFeedingBanned) score++; else missing.push('Swill Feeding Violation (Severe ASF Risk)');
-  if (bio.disinfectionRoutine) score++; else missing.push('No Regular Pen Disinfection');
-  if (bio.visitorLogControl) score++; else missing.push('Uncontrolled Visitor Access');
-  if (bio.quarantineIsolationPen) score++; else missing.push('No Isolation / Quarantine Pen');
-  if (bio.cleanWaterSource) score++; else missing.push('Unprotected Water Source');
-
-  const deficit = 7 - score;
-  const percentage = Math.round((score / 7) * 100);
-  const isSwillViolation = !bio.swillFeedingBanned;
-  const isCriticalHotspot = score <= 3 || isSwillViolation;
+  const bioEval = calculateBiosecurityScore(pig.biosecurity);
+  const asfRisk = determineAsfRiskLevel(pig);
+  const deficit = bioEval.maxScore - bioEval.score;
+  const isSwillViolation = bioEval.isSwillViolation;
+  const isCriticalHotspot = asfRisk.code === 'RED' || asfRisk.code === 'PINK' || isSwillViolation;
 
   // Thermal weight formula:
-  // Deficit scaled by 0.45, plus severe weight for non-negotiable DA ASF rules (swill ban & footbath)
   let riskWeight = deficit * 0.45;
   if (isSwillViolation) riskWeight += 1.4; // Swill feeding is primary driver of African Swine Fever
-  if (!bio.footbathMaintenance) riskWeight += 0.5;
-  if (!bio.disinfectionRoutine) riskWeight += 0.5;
+  if (asfRisk.code === 'RED') riskWeight += 2.0;
   if (!pig.vaccinated) riskWeight += 0.4;
-
-  if (score >= 6 && !isSwillViolation) {
+  if (bioEval.score >= 6 && !isSwillViolation) {
     riskWeight = 0.05; // Compliant farms produce negligible sanitation heat
   }
 
   const riskLevel: 'critical' | 'moderate' | 'compliant' = 
-    isCriticalHotspot ? 'critical' : (score <= 5 ? 'moderate' : 'compliant');
+    isCriticalHotspot ? 'critical' : (bioEval.score <= 4 ? 'moderate' : 'compliant');
 
   return {
-    score,
-    maxScore: 7,
-    percentage,
+    score: bioEval.score,
+    maxScore: bioEval.maxScore,
+    percentage: bioEval.percentage,
     deficit,
     riskLevel,
     riskWeight: Math.max(0.05, riskWeight),
     isCriticalHotspot,
     isSwillViolation,
-    missingPractices: missing
+    missingPractices: bioEval.missingPractices
   };
 }
 

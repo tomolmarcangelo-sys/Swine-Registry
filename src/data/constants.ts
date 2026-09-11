@@ -235,21 +235,24 @@ export const PURPOSES: PurposeType[] = [
   'Backyard Raising',
   'Breeding Stock',
   'Fattening/Commercial',
-  'Piggery'
+  'Piggery',
+  'Commercial Breeding'
 ];
 
 export const PURPOSE_COLORS: Record<string, string> = {
   'Backyard Raising': '#2F5C3F', // Forest Green
   'Breeding Stock': '#7C3AED',  // Violet
   'Fattening/Commercial': '#D97706', // Amber Gold
-  'Piggery': '#2563EB'          // Deep Blue
+  'Piggery': '#2563EB',         // Deep Blue
+  'Commercial Breeding': '#0D9488' // Teal
 };
 
 export const PURPOSE_BG_CLASSES: Record<string, string> = {
   'Backyard Raising': 'bg-emerald-100 text-emerald-900 border-emerald-300',
   'Breeding Stock': 'bg-purple-100 text-purple-900 border-purple-300',
   'Fattening/Commercial': 'bg-amber-100 text-amber-900 border-amber-300',
-  'Piggery': 'bg-blue-100 text-blue-900 border-blue-300'
+  'Piggery': 'bg-blue-100 text-blue-900 border-blue-300',
+  'Commercial Breeding': 'bg-teal-100 text-teal-900 border-teal-300'
 };
 
 export const DEFAULT_USERS: User[] = [
