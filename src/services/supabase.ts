@@ -1,12 +1,27 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const rawUrl = (import.meta.env.VITE_SUPABASE_URL as string) || '';
-const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || '';
+const getEnv = (key: string): string => {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta?.env?.[key]) {
+      return import.meta.env[key];
+    }
+  } catch {}
+  try {
+    if (typeof process !== 'undefined' && process?.env?.[key]) {
+      return process.env[key] as string;
+    }
+  } catch {}
+  return '';
+};
+
+const DEFAULT_SUPABASE_URL = 'https://lpkquznudtqrpuzmwhdt.supabase.co';
+const rawUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL') || '';
+const rawKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY') || '';
 
 const isValidUrl = Boolean(rawUrl && (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')));
 
-// Safe fallback URL and key to prevent top-level module load crashes when environment variables are missing
-const supabaseUrl = isValidUrl ? rawUrl : 'https://placeholder-project.supabase.co';
+// Synchronize with production Supabase instance
+const supabaseUrl = isValidUrl ? rawUrl : DEFAULT_SUPABASE_URL;
 const supabaseAnonKey = rawKey || 'placeholder-anon-key';
 
 let supabaseClientInstance: SupabaseClient;

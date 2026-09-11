@@ -44,6 +44,7 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           runtimeCaching: [
             {
@@ -105,6 +106,21 @@ export default defineConfig(() => {
       port: 3000,
       host: '0.0.0.0',
       hmr: false,
+    },
+    build: {
+      outDir: 'dist',
+      chunkSizeWarningLimit: 3000,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            vendor: ['react', 'react-dom'],
+            leaflet: ['leaflet', 'react-leaflet'],
+            recharts: ['recharts'],
+            supabase: ['@supabase/supabase-js'],
+            lucide: ['lucide-react'],
+          },
+        },
+      },
     },
   };
 });

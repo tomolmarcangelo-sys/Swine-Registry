@@ -3,18 +3,30 @@ import { supabase } from './supabase';
 import { PigRecord, User, AuditLogItem } from '../types';
 
 // Export functions for checking configuration and accessing single client instance
-const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) || '';
-const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || '';
+const getEnv = (key: string): string => {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta?.env?.[key]) {
+      return import.meta.env[key];
+    }
+  } catch {}
+  try {
+    if (typeof process !== 'undefined' && process?.env?.[key]) {
+      return process.env[key] as string;
+    }
+  } catch {}
+  return '';
+};
+
+const DEFAULT_SUPABASE_URL = 'https://lpkquznudtqrpuzmwhdt.supabase.co';
+const supabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('SUPABASE_URL') || DEFAULT_SUPABASE_URL;
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('SUPABASE_ANON_KEY') || '';
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean(supabaseUrl && supabaseAnonKey && supabaseUrl.startsWith('https://'));
+  return Boolean(supabaseUrl && supabaseUrl.startsWith('https://') && supabase);
 }
 
 export function getSupabaseClient(): SupabaseClient | null {
-  if (!isSupabaseConfigured()) {
-    return null;
-  }
-  return supabase;
+  return supabase || null;
 }
 
 // ----------------- ROW CONVERTERS -----------------

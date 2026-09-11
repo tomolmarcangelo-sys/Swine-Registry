@@ -1,0 +1,92 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model PigRecord {
+  id               String   @id @default(uuid())
+  earTag           String   @map("ear_tag")
+  ownerName        String   @map("owner_name")
+  contact          String   @default("")
+  address          String   @default("")
+  barangay         String   @default("Poblacion 1")
+  breed            String   @default("Native / Native-cross")
+  sex              String   @default("Female")
+  age              Int      @default(6)
+  weight           Float    @default(75.0)
+  purpose          String   @default("Backyard Raising")
+  vaccinated       Boolean  @default(false)
+  asfCleared       Boolean  @default(true) @map("asf_cleared")
+  dateRegistered   DateTime @default(now()) @map("date_registered")
+  lat              Float    @default(10.3700)
+  lng              Float    @default(125.2000)
+  gpsAccuracy      Float?   @map("gps_accuracy")
+  gpsAltitude      Float?   @map("gps_altitude")
+  gpsTimestamp     String?  @map("gps_timestamp")
+  registeredBy     String   @default("focal_person") @map("registered_by")
+  notes            String?  @default("")
+  biosecurity      Json?
+  photoUrl         String?  @map("photo_url")
+  healthStatus     String   @default("Healthy") @map("health_status")
+  isDeceased       Boolean  @default(false) @map("is_deceased")
+  mortalityDate    String?  @map("mortality_date")
+  mortalityReason  String?  @map("mortality_reason")
+  headCount        Int      @default(1) @map("head_count")
+  biosecurityLevel Int      @default(1) @map("biosecurity_level")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("pig_records")
+}
+
+model User {
+  id               String   @id @default(uuid())
+  username         String   @unique
+  passwordHash     String?  @map("password_hash")
+  role             String   @default("user")
+  fullName         String   @map("full_name")
+  barangay         String?
+  assignedBarangay String?  @map("assigned_barangay")
+  isActive         Boolean  @default(true) @map("is_active")
+  email            String?
+  phone            String?
+  avatarUrl        String?  @map("avatar_url")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  timestamp    DateTime @default(now())
+  username     String
+  userFullName String   @map("user_full_name")
+  role         String   @default("user")
+  action       String
+  details      String   @default("")
+  barangay     String?
+  entityType   String?  @default("system") @map("entity_type")
+  ipAddress    String?  @default("127.0.0.1") @map("ip_address")
+
+  @@map("audit_logs")
+}
+
+model Farm {
+  id         String   @id @default(uuid())
+  farmName   String   @map("farm_name")
+  ownerName  String   @map("owner_name")
+  barangay   String
+  lat        Float
+  lng        Float
+  headCount  Int      @default(0) @map("head_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("farms")
+}

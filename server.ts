@@ -5,10 +5,15 @@ import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import path from 'path';
 
+import { swineRouter } from './src/server/routes/swine';
+import { usersRouter } from './src/server/routes/users';
+import { healthRouter } from './src/server/routes/health';
+import { errorHandler } from './src/server/middleware/errorHandler';
+
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 // Configure dynamic CORS origins (Vercel frontend, local development, custom domain)
 const allowedOrigins = [
@@ -39,6 +44,11 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Dedicated Prisma ORM Server API Routers (/api/*)
+app.use('/api/swine', swineRouter);
+app.use('/api/users', usersRouter);
+app.use('/api', healthRouter);
 
 // PostgreSQL / Supabase PostGIS Connection Pool
 let dbPool: Pool | null = null;
@@ -541,13 +551,16 @@ app.delete('/api/users/:username', async (req: Request, res: Response) => {
   }
 });
 
+// Global API error handler middleware
+app.use(errorHandler);
+
 // Vite middleware in development & static serving in production
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     try {
       const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
-        server: { middlewareMode: true },
+        server: { middlewareMode: true, hmr: false },
         appType: 'spa',
       });
       app.use(vite.middlewares);
@@ -582,4 +595,8 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;

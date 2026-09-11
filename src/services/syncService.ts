@@ -12,6 +12,7 @@ import {
   getSupabaseClient,
   rowToPig
 } from './supabaseClient';
+import { fetchPigsFromApi, fetchUsersFromApi } from './apiClient';
 import { supabase } from './supabase';
 
 const STORAGE_SYNC_QUEUE = 'hinunangan_da_sync_queue_v4';
@@ -39,6 +40,8 @@ export function setConflictPolicy(policy: ConflictPolicy): void {
 }
 
 let isSyncingInternal = false;
+let lastGlobalProcessTime = 0;
+const GLOBAL_PROCESS_COOLDOWN_MS = 10000; // 10 seconds global cooldown between automatic queue sweeps
 
 // Global online/offline network listeners
 if (typeof window !== 'undefined') {
@@ -228,9 +231,9 @@ export async function syncWithSupabase(): Promise<{ pigs: PigRecord[]; users: Us
     // 1. Process outbound offline queue first to ensure pending creations are pushed
     await processSyncQueue();
 
-    // 2. Fetch authoritative state from Supabase
-    let cloudPigs = await fetchPigsFromSupabase();
-    let cloudUsers = await fetchUsersFromSupabase();
+    // 2. Fetch authoritative state from Server API Engine (/api/*) with fallback
+    let cloudPigs = await fetchPigsFromApi();
+    let cloudUsers = await fetchUsersFromApi();
 
     let localPigs = loadStoredPigs();
     let localUsers = loadStoredUsers();
@@ -291,7 +294,13 @@ export async function processSyncQueue(targetId?: string): Promise<SyncProcessRe
     return { totalProcessed: 0, successCount: 0, failedCount: 0, results: [] };
   }
 
+  const now = Date.now();
+  if (!targetId && now - lastGlobalProcessTime < GLOBAL_PROCESS_COOLDOWN_MS) {
+    return { totalProcessed: 0, successCount: 0, failedCount: 0, results: [] };
+  }
+
   isSyncingInternal = true;
+  lastGlobalProcessTime = now;
   try {
     const queue = loadSyncQueue();
     const itemsToSync = targetId ? queue.filter(q => q.id === targetId) : queue.filter(q => q.status === 'pending' || q.status === 'error');
